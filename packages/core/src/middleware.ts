@@ -5,5 +5,5 @@ export type SchemaMiddleware = (schema: JsonSchema) => JsonSchema;
 
 /** Compose N middleware functions left-to-right over a schema */
 export function applySchemaMiddleware(schema: JsonSchema, fns: readonly SchemaMiddleware[]): JsonSchema {
-  return fns.reduce<JsonSchema>((s, fn) => fn(s), schema);
+	return fns.reduce<JsonSchema>((s, fn) => fn(s), schema);
 }
