@@ -9,28 +9,28 @@ export type { SchemaErrorCode } from "./errors.js";
 export { SchemaError } from "./errors.js";
 export type { SchemaExtractor } from "./extractor-registry.js";
 export {
-  clearExtractorRegistry,
-  createValidationOnlyResult,
-  findExtractor,
-  registerExtractor,
+	clearExtractorRegistry,
+	createValidationOnlyResult,
+	findExtractor,
+	registerExtractor,
 } from "./extractor-registry.js";
 export { ingestSchema } from "./ingest.js";
 export type { MergeInput, MetadataSource } from "./metadata-merge.js";
 export {
-  mergeMetadata,
-  mergeSamePrecedence,
-  structuralEqual,
+	mergeMetadata,
+	mergeSamePrecedence,
+	structuralEqual,
 } from "./metadata-merge.js";
 export type { SchemaMiddleware } from "./middleware.js";
 export { applySchemaMiddleware } from "./middleware.js";
 export type {
-  SchemaFieldInfo,
-  SchemaFieldMetadata,
-  SchemaFieldType,
-  SchemaIngestionResult,
-  SchemaMetadata,
-  StandardSchemaIssue,
-  StandardSchemaResult,
-  StandardSchemaV1,
+	SchemaFieldInfo,
+	SchemaFieldMetadata,
+	SchemaFieldType,
+	SchemaIngestionResult,
+	SchemaMetadata,
+	StandardSchemaIssue,
+	StandardSchemaResult,
+	StandardSchemaV1,
 } from "./types.js";
 export { checkType, isObject } from "./utils.js";
