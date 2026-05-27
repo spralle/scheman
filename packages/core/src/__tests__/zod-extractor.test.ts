@@ -1,0 +1,216 @@
+import { describe, expect, it } from "vitest";
+import { extractFromZod } from "../adapters/zod-extractor.js";
+
+function zodV3(typeName: string, extra: Record<string, unknown> = {}) {
+	return {
+		"~standard": { version: 1, vendor: "zod", validate: () => ({ value: undefined }) },
+		_def: { typeName, ...extra },
+	};
+}
+
+function zodV3Object(shape: Record<string, unknown>) {
+	return zodV3("ZodObject", { shape: () => shape });
+}
+
+function zodV3Optional(inner: unknown) {
+	return zodV3("ZodOptional", { innerType: inner });
+}
+
+describe("extractFromZod", () => {
+	describe("basic leaf types", () => {
+		it("maps ZodString to string", () => {
+			const schema = zodV3Object({ name: zodV3("ZodString") });
+			const result = extractFromZod(schema);
+			expect(result.fields[0]).toMatchObject({ path: "name", type: "string", required: true });
+		});
+
+		it("maps ZodNumber to number", () => {
+			const schema = zodV3Object({ age: zodV3("ZodNumber") });
+			const result = extractFromZod(schema);
+			expect(result.fields[0]).toMatchObject({ path: "age", type: "number", required: true });
+		});
+
+		it("maps ZodBoolean to boolean", () => {
+			const schema = zodV3Object({ active: zodV3("ZodBoolean") });
+			const result = extractFromZod(schema);
+			expect(result.fields[0]).toMatchObject({ path: "active", type: "boolean", required: true });
+		});
+
+		it("maps ZodDate to date", () => {
+			const schema = zodV3Object({ created: zodV3("ZodDate") });
+			const result = extractFromZod(schema);
+			expect(result.fields[0]).toMatchObject({ path: "created", type: "date", required: true });
+		});
+	});
+
+	describe("object traversal", () => {
+		it("extracts fields from object shape", () => {
+			const schema = zodV3Object({
+				name: zodV3("ZodString"),
+				age: zodV3("ZodNumber"),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields).toHaveLength(2);
+			expect(result.fields[0].path).toBe("name");
+			expect(result.fields[1].path).toBe("age");
+		});
+
+		it("handles nested objects with dot-path notation", () => {
+			const schema = zodV3Object({
+				address: zodV3Object({
+					street: zodV3("ZodString"),
+					city: zodV3("ZodString"),
+				}),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0].path).toBe("address.street");
+			expect(result.fields[1].path).toBe("address.city");
+		});
+	});
+
+	describe("optional fields", () => {
+		it("marks optional fields as not required", () => {
+			const schema = zodV3Object({
+				nickname: zodV3Optional(zodV3("ZodString")),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0]).toMatchObject({ path: "nickname", type: "string", required: false });
+		});
+	});
+
+	describe("nullable fields", () => {
+		it("sets metadata.nullable to true", () => {
+			const schema = zodV3Object({
+				bio: zodV3("ZodNullable", { innerType: zodV3("ZodString") }),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0]).toMatchObject({ path: "bio", type: "string", required: true });
+			expect(result.fields[0].metadata?.nullable).toBe(true);
+		});
+	});
+
+	describe("default values", () => {
+		it("marks field as not required and sets defaultValue", () => {
+			const schema = zodV3Object({
+				role: zodV3("ZodDefault", {
+					innerType: zodV3("ZodString"),
+					defaultValue: () => "user",
+				}),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0].required).toBe(false);
+			expect(result.fields[0].defaultValue).toBe("user");
+		});
+	});
+
+	describe("enum types", () => {
+		it("extracts enum values", () => {
+			const schema = zodV3Object({
+				status: zodV3("ZodEnum", { values: ["active", "inactive"] }),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0].type).toBe("enum");
+			expect(result.fields[0].metadata?.enum).toEqual(["active", "inactive"]);
+		});
+	});
+
+	describe("array type", () => {
+		it("maps ZodArray to array", () => {
+			const schema = zodV3Object({
+				tags: zodV3("ZodArray", { type: zodV3("ZodString") }),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0]).toMatchObject({ path: "tags", type: "array", required: true });
+		});
+	});
+
+	describe("union type", () => {
+		it("maps ZodUnion to union", () => {
+			const schema = zodV3Object({
+				value: zodV3("ZodUnion", { options: [] }),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0]).toMatchObject({ path: "value", type: "union", required: true });
+		});
+	});
+
+	describe("description", () => {
+		it("extracts description from _def.description", () => {
+			const schema = zodV3Object({
+				name: zodV3("ZodString", { description: "The user name" }),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0].metadata?.description).toBe("The user name");
+		});
+	});
+
+	describe("checks extraction", () => {
+		it("extracts min/max length from checks", () => {
+			const schema = zodV3Object({
+				name: zodV3("ZodString", {
+					checks: [
+						{ kind: "min", value: 3 },
+						{ kind: "max", value: 50 },
+					],
+				}),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0].metadata?.minLength).toBe(3);
+			expect(result.fields[0].metadata?.maxLength).toBe(50);
+		});
+	});
+
+	describe("ZodReadonly wrapper", () => {
+		it("sets metadata.readOnly to true", () => {
+			const schema = zodV3Object({
+				id: zodV3("ZodReadonly", { innerType: zodV3("ZodString") }),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0].metadata?.readOnly).toBe(true);
+		});
+	});
+
+	describe("error on missing _def", () => {
+		it("throws SCHEMA_PARSE_FAILED when _def is missing", () => {
+			expect(() => extractFromZod({})).toThrow("Schema does not appear to be a Zod schema");
+		});
+	});
+
+	describe("ZodLiteral", () => {
+		it("maps string literal correctly", () => {
+			const schema = zodV3Object({
+				kind: zodV3("ZodLiteral", { value: "admin" }),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0]).toMatchObject({ path: "kind", type: "string", required: true });
+			expect(result.fields[0].metadata?.const).toBe("admin");
+		});
+
+		it("maps number literal correctly", () => {
+			const schema = zodV3Object({
+				code: zodV3("ZodLiteral", { value: 42 }),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0].type).toBe("number");
+			expect(result.fields[0].metadata?.const).toBe(42);
+		});
+	});
+
+	describe("ZodBigInt", () => {
+		it("maps to integer type", () => {
+			const schema = zodV3Object({
+				bigId: zodV3("ZodBigInt"),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0]).toMatchObject({ path: "bigId", type: "integer", required: true });
+		});
+	});
+
+	describe("metadata", () => {
+		it("returns vendor as zod", () => {
+			const schema = zodV3Object({ name: zodV3("ZodString") });
+			const result = extractFromZod(schema);
+			expect(result.metadata.vendor).toBe("zod");
+		});
+	});
+});
