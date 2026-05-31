@@ -4,6 +4,7 @@
 	"workspaces": ["packages/*"],
 	"scripts": {
 		"build": "bun run --filter '*' build:dist",
+		"typecheck": "bun run --filter '*' build",
 		"test": "vitest run",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write ."
