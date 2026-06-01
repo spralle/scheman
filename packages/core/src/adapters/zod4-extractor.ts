@@ -1,4 +1,3 @@
-import { SchemaError } from "../errors.js";
 import type {
 	SchemaFieldInfo,
 	SchemaFieldMetadata,
@@ -285,17 +284,19 @@ function buildV4Metadata(
 	// Extra
 	if (extra) Object.assign(result, extra);
 
-	// Formbar metadata
+	// Vendor extensions (from .meta({ vendor: {...} }))
 	const rawMeta = def.metadata as Record<string, unknown> | undefined;
-	if (rawMeta && "x-formbar" in rawMeta) {
-		throw new SchemaError(
-			"SCHEMA_ZOD_TRANSFORM_FORBIDDEN",
-			"x-formbar is not allowed in Zod metadata. Use .meta({ formbar: { ... } }) instead.",
-		);
-	}
-	if (rawMeta && typeof rawMeta === "object" && "formbar" in rawMeta) {
-		const formbar = rawMeta.formbar as Record<string, unknown>;
-		Object.assign(result, formbar);
+	if (rawMeta && typeof rawMeta === "object") {
+		const extensions: Record<string, Record<string, unknown>> = {};
+		for (const [key, value] of Object.entries(rawMeta)) {
+			if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+				extensions[key] = value as Record<string, unknown>;
+			}
+		}
+		if (Object.keys(extensions).length > 0) {
+			const existing = result.extensions as Record<string, Readonly<Record<string, unknown>>> | undefined;
+			result.extensions = { ...existing, ...extensions };
+		}
 	}
 
 	return Object.keys(result).length > 0 ? (result as SchemaFieldMetadata) : undefined;

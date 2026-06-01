@@ -27,10 +27,11 @@ export function extractFromZod(schema: unknown): SchemaIngestionResult {
 
 	const fields: SchemaFieldInfo[] = [];
 
-	const rootMeta = extractFormbarMetadata(zodSchema);
+	const rootDef = zodSchema._def;
+	const rootExtensions = rootDef ? extractVendorExtensions(rootDef) : undefined;
 	const metadata: SchemaMetadata = {
 		vendor: "zod",
-		...(rootMeta ? { extra: rootMeta as unknown as Readonly<Record<string, unknown>> } : {}),
+		...(rootExtensions ? { extra: rootExtensions as unknown as Readonly<Record<string, unknown>> } : {}),
 	};
 
 	walkZodSchema(zodSchema, "", fields, true);
@@ -244,58 +245,22 @@ function mapZodType(typeName: string): SchemaFieldType {
 	}
 }
 
-const KNOWN_META_KEYS = new Set([
-	"title",
-	"description",
-	"enum",
-	"default",
-	"minimum",
-	"maximum",
-	"exclusiveMinimum",
-	"exclusiveMaximum",
-	"minLength",
-	"maxLength",
-	"format",
-	"pattern",
-	"widget",
-	"options",
-	"label",
-	"placeholder",
-]);
-
-function extractFormbarMetadata(schema: ZodLike): SchemaFieldMetadata | undefined {
-	const def = schema._def;
-	if (!def) return undefined;
-
+/** Extract all object-valued keys from .meta({...}) as vendor extensions */
+function extractVendorExtensions(
+	def: ZodTypeDef & Record<string, unknown>,
+): Record<string, Record<string, unknown>> | undefined {
 	const rawMeta = def.metadata as Record<string, unknown> | undefined;
-	if (rawMeta && "x-formbar" in rawMeta) {
-		throw new SchemaError(
-			"SCHEMA_ZOD_TRANSFORM_FORBIDDEN",
-			"x-formbar is not allowed in Zod metadata. Use .meta({ formbar: { ... } }) instead.",
-		);
+	if (!rawMeta || typeof rawMeta !== "object") return undefined;
+
+	const extensions: Record<string, Record<string, unknown>> = {};
+
+	for (const [key, value] of Object.entries(rawMeta)) {
+		if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+			extensions[key] = value as Record<string, unknown>;
+		}
 	}
 
-	if (rawMeta && typeof rawMeta === "object" && "formbar" in rawMeta) {
-		const formbar = rawMeta.formbar as Record<string, unknown>;
-		const result: Record<string, unknown> = {};
-		const extra: Record<string, unknown> = {};
-
-		for (const [key, value] of Object.entries(formbar)) {
-			if (KNOWN_META_KEYS.has(key)) {
-				result[key] = value;
-			} else {
-				extra[key] = value;
-			}
-		}
-
-		if (Object.keys(extra).length > 0) {
-			result.extra = extra;
-		}
-
-		return Object.keys(result).length > 0 ? (result as SchemaFieldMetadata) : undefined;
-	}
-
-	return undefined;
+	return Object.keys(extensions).length > 0 ? extensions : undefined;
 }
 
 /** Extract validation checks from Zod _def.checks array */
@@ -351,7 +316,7 @@ function extractZodChecks(def: ZodTypeDef & Record<string, unknown>): Record<str
 	return result;
 }
 
-/** Merge formbar metadata, checks, description, and context into SchemaFieldMetadata */
+/** Merge vendor extensions, checks, description, and context into SchemaFieldMetadata */
 function mergeZodMetadata(
 	schema: ZodLike,
 	ctx: WalkContext,
@@ -381,11 +346,11 @@ function mergeZodMetadata(
 	// Extra type-specific metadata
 	if (extra) Object.assign(result, extra);
 
-	// Formbar metadata (from .meta({ formbar: {...} })) → extensions.formbar
-	const formbarExtensions = extractFormbarMetadata(schema);
-	if (formbarExtensions) {
+	// Vendor extensions (from .meta({ vendor: {...} })) → extensions.*
+	const extensions = extractVendorExtensions(def);
+	if (extensions) {
 		const existing = result.extensions as Record<string, Readonly<Record<string, unknown>>> | undefined;
-		result.extensions = { ...existing, ...formbarExtensions };
+		result.extensions = { ...existing, ...extensions };
 	}
 
 	return Object.keys(result).length > 0 ? (result as SchemaFieldMetadata) : undefined;
