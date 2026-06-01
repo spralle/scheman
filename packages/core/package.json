@@ -3,7 +3,13 @@
 	"version": "0.1.0",
 	"type": "module",
 	"description": "Universal schema ingestion and metadata extraction for JSON Schema, Zod v3, and Zod v4",
+	"keywords": ["schema", "json-schema", "zod", "metadata", "extraction", "standard-schema", "ingestion"],
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/spralle/scheman.git",
+		"directory": "packages/core"
+	},
 	"main": "./dist/index.cjs",
 	"module": "./dist/index.js",
 	"types": "./dist/index.d.ts",

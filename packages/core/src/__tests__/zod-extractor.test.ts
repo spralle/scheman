@@ -213,4 +213,51 @@ describe("extractFromZod", () => {
 			expect(result.metadata.vendor).toBe("zod");
 		});
 	});
+
+	describe("vendor extensions", () => {
+		it("extracts formbar object from .meta() into extensions.formbar", () => {
+			const schema = zodV3Object({
+				age: zodV3("ZodNumber", { metadata: { formbar: { widget: "slider" } } }),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0]?.metadata?.extensions).toEqual({ formbar: { widget: "slider" } });
+		});
+
+		it("extracts tanstack object from .meta() into extensions.tanstack", () => {
+			const schema = zodV3Object({
+				name: zodV3("ZodString", { metadata: { tanstack: { sortable: true } } }),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0]?.metadata?.extensions).toEqual({ tanstack: { sortable: true } });
+		});
+
+		it("extracts multiple vendor keys", () => {
+			const schema = zodV3Object({
+				name: zodV3("ZodString", {
+					metadata: { formbar: { widget: "input" }, tanstack: { filterable: true } },
+				}),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0]?.metadata?.extensions).toEqual({
+				formbar: { widget: "input" },
+				tanstack: { filterable: true },
+			});
+		});
+
+		it("ignores non-object metadata values", () => {
+			const schema = zodV3Object({
+				name: zodV3("ZodString", { metadata: { label: "Name", count: 42 } }),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0]?.metadata?.extensions).toBeUndefined();
+		});
+
+		it("does not throw on x-vendor keys in meta", () => {
+			const schema = zodV3Object({
+				name: zodV3("ZodString", { metadata: { "x-custom": { foo: "bar" } } }),
+			});
+			const result = extractFromZod(schema);
+			expect(result.fields[0]?.metadata?.extensions).toEqual({ "x-custom": { foo: "bar" } });
+		});
+	});
 });
