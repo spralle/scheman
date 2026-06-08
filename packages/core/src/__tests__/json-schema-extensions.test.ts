@@ -57,14 +57,15 @@ describe("extractFromJsonSchema x-* extensions", () => {
 				age: {
 					type: "number",
 					// Non-object x-* values should be ignored
-					"x-deprecated-reason": { note: "use birthdate" } as Record<string, unknown>,
+					"x-deprecated": true as unknown as Record<string, unknown>,
+					"x-version": 3 as unknown as Record<string, unknown>,
+					"x-label": "Age field" as unknown as Record<string, unknown>,
 				},
 			},
 		};
 		const result = extractFromJsonSchema(schema);
 		const field = result.fields.find((f) => f.path === "age");
-		// The object one should be extracted
-		expect(field?.metadata?.extensions?.["deprecated-reason"]).toEqual({ note: "use birthdate" });
+		expect(field?.metadata?.extensions).toBeUndefined();
 	});
 
 	test("no extensions when no x-* keys present", () => {
