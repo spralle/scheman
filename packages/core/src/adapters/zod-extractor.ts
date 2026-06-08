@@ -290,6 +290,7 @@ function extractZodChecks(def: ZodTypeDef & Record<string, unknown>): Record<str
 			case "url":
 			case "uuid":
 			case "cuid":
+			case "int":
 				result.format = kind;
 				break;
 			case "gte":
@@ -305,9 +306,6 @@ function extractZodChecks(def: ZodTypeDef & Record<string, unknown>): Record<str
 				break;
 			case "lt":
 				result.exclusiveMaximum = check.value;
-				break;
-			case "int":
-				result.format = "int";
 				break;
 			default:
 				result[kind] = check.value ?? true;

@@ -148,9 +148,9 @@ function walkZodV4(
 	}
 
 	// Leaf types
-	const fieldType = mapZodV4Type(type);
-	const metadata = buildV4Metadata(def, ctx);
 	if (prefix) {
+		const fieldType = mapZodV4Type(type);
+		const metadata = buildV4Metadata(def, ctx);
 		fields.push({
 			path: prefix,
 			type: fieldType,

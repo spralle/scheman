@@ -80,21 +80,15 @@ describe("mergeSamePrecedence", () => {
 	});
 
 	it("throws SCHEMA_META_CONFLICT for different scalars", () => {
-		expect(() => mergeSamePrecedence({ a: 1 }, { a: 2 })).toThrow(SchemaError);
-		try {
-			mergeSamePrecedence({ a: 1 }, { a: 2 });
-		} catch (e) {
-			expect((e as SchemaError).code).toBe("SCHEMA_META_CONFLICT");
-		}
+		expect(() => mergeSamePrecedence({ a: 1 }, { a: 2 })).toThrow(
+			expect.objectContaining({ code: "SCHEMA_META_CONFLICT" }),
+		);
 	});
 
 	it("throws SCHEMA_META_CONFLICT for different arrays", () => {
-		expect(() => mergeSamePrecedence({ a: [1] }, { a: [2] })).toThrow(SchemaError);
-		try {
-			mergeSamePrecedence({ a: [1] }, { a: [2] });
-		} catch (e) {
-			expect((e as SchemaError).code).toBe("SCHEMA_META_CONFLICT");
-		}
+		expect(() => mergeSamePrecedence({ a: [1] }, { a: [2] })).toThrow(
+			expect.objectContaining({ code: "SCHEMA_META_CONFLICT" }),
+		);
 	});
 
 	it("throws SCHEMA_META_CONFLICT for nested sub-conflicts", () => {
