@@ -51,115 +51,121 @@ function walkZodV4(
 
 	const type = def.type as string | undefined;
 	if (!type) return;
+	if (walkZodV4Wrapper(def, type, prefix, fields, required, ctx)) return;
+	if (walkZodV4Structure(def, type, prefix, fields, required, ctx)) return;
+	if (walkZodV4SpecialLeaf(def, type, prefix, fields, required, ctx)) return;
+	pushZodV4Field(fields, prefix, mapZodV4Type(type), required, buildV4Metadata(def, ctx), ctx.defaultValue);
+}
 
-	// Unwrap wrappers
+function walkZodV4Wrapper(
+	def: Readonly<Record<string, unknown>>,
+	type: string,
+	prefix: string,
+	fields: SchemaFieldInfo[],
+	required: boolean,
+	ctx: WalkContext,
+): boolean {
 	if (type === "optional") {
 		walkZodV4Inner(def, "innerType", prefix, fields, false, ctx);
-		return;
+		return true;
 	}
 	if (type === "nullable") {
 		walkZodV4Inner(def, "innerType", prefix, fields, required, { ...ctx, nullable: true });
-		return;
+		return true;
 	}
 	if (type === "default") {
 		const defaultValue = typeof def.defaultValue === "function" ? (def.defaultValue as () => unknown)() : undefined;
 		walkZodV4Inner(def, "innerType", prefix, fields, false, { ...ctx, defaultValue });
-		return;
+		return true;
 	}
 	if (type === "effects" || type === "pipeline") {
-		const key = type === "effects" ? "schema" : "in";
-		walkZodV4Inner(def, key, prefix, fields, required, ctx);
-		return;
+		walkZodV4Inner(def, type === "effects" ? "schema" : "in", prefix, fields, required, ctx);
+		return true;
 	}
 	if (type === "lazy") {
 		const getter = def.getter as (() => unknown) | undefined;
 		if (getter) walkZodV4(getter(), prefix, fields, required, ctx);
-		return;
+		return true;
 	}
-	if (type === "branded" || type === "readonly" || type === "catch") {
-		const key = type === "branded" ? "type" : "innerType";
-		const nextCtx = type === "readonly" ? { ...ctx, readOnly: true } : ctx;
-		walkZodV4Inner(def, key, prefix, fields, required, nextCtx);
-		return;
-	}
+	if (type !== "branded" && type !== "readonly" && type !== "catch") return false;
+	const key = type === "branded" ? "type" : "innerType";
+	const nextCtx = type === "readonly" ? { ...ctx, readOnly: true } : ctx;
+	walkZodV4Inner(def, key, prefix, fields, required, nextCtx);
+	return true;
+}
 
-	// Structural types
+function walkZodV4Structure(
+	def: Readonly<Record<string, unknown>>,
+	type: string,
+	prefix: string,
+	fields: SchemaFieldInfo[],
+	required: boolean,
+	ctx: WalkContext,
+): boolean {
 	if (type === "object") {
 		const shape = def.shape as Record<string, unknown> | undefined;
-		if (shape) {
-			for (const [key, value] of Object.entries(shape)) {
-				const childPath = prefix ? `${prefix}.${key}` : key;
-				walkZodV4(value, childPath, fields, true);
-			}
+		for (const [key, value] of Object.entries(shape ?? {})) {
+			walkZodV4(value, prefix ? `${prefix}.${key}` : key, fields, true);
 		}
-		return;
+		return true;
 	}
-
 	if (type === "array") {
-		const metadata = buildV4Metadata(def, ctx);
-		if (prefix) {
-			fields.push({ path: prefix, type: "array", required, ...(metadata ? { metadata } : {}) });
-		}
-		return;
+		pushZodV4Field(fields, prefix, "array", required, buildV4Metadata(def, ctx));
+		return true;
 	}
+	if (type !== "intersection") return false;
+	const left = def.left as unknown;
+	const right = def.right as unknown;
+	if (left) walkZodV4(left, prefix, fields, required, ctx);
+	if (right) walkZodV4(right, prefix, fields, required, ctx);
+	return true;
+}
 
-	if (type === "intersection") {
-		const left = def.left as unknown;
-		const right = def.right as unknown;
-		if (left) walkZodV4(left, prefix, fields, required, ctx);
-		if (right) walkZodV4(right, prefix, fields, required, ctx);
-		return;
-	}
-
+function walkZodV4SpecialLeaf(
+	def: Readonly<Record<string, unknown>>,
+	type: string,
+	prefix: string,
+	fields: SchemaFieldInfo[],
+	required: boolean,
+	ctx: WalkContext,
+): boolean {
+	let fieldType: SchemaFieldType;
+	let extra: Record<string, unknown>;
 	if (type === "record") {
-		const metadata = buildV4Metadata(def, ctx, { additionalProperties: true });
-		if (prefix) {
-			fields.push({ path: prefix, type: "object", required, ...(metadata ? { metadata } : {}) });
-		}
-		return;
-	}
-
-	if (type === "tuple") {
-		const items = def.items as readonly unknown[] | undefined;
-		const metadata = buildV4Metadata(def, ctx, { tuple: true, itemCount: items?.length ?? 0 });
-		if (prefix) {
-			fields.push({ path: prefix, type: "array", required, ...(metadata ? { metadata } : {}) });
-		}
-		return;
-	}
-
-	if (type === "literal") {
+		fieldType = "object";
+		extra = { additionalProperties: true };
+	} else if (type === "tuple") {
+		fieldType = "array";
+		extra = { tuple: true, itemCount: (def.items as readonly unknown[] | undefined)?.length ?? 0 };
+	} else if (type === "literal") {
 		const value = def.value;
-		const litType = typeof value === "number" ? "number" : typeof value === "boolean" ? "boolean" : "string";
-		const metadata = buildV4Metadata(def, ctx, { const: value });
-		if (prefix) {
-			fields.push({ path: prefix, type: litType as SchemaFieldType, required, ...(metadata ? { metadata } : {}) });
-		}
-		return;
-	}
-
-	if (type === "nativeEnum") {
+		fieldType = typeof value === "number" ? "number" : typeof value === "boolean" ? "boolean" : "string";
+		extra = { const: value };
+	} else if (type === "nativeEnum") {
 		const values = def.values as Record<string, unknown> | undefined;
-		const enumValues = values ? Object.values(values) : [];
-		const metadata = buildV4Metadata(def, ctx, { enum: enumValues });
-		if (prefix) {
-			fields.push({ path: prefix, type: "enum", required, ...(metadata ? { metadata } : {}) });
-		}
-		return;
-	}
+		fieldType = "enum";
+		extra = { enum: values ? Object.values(values) : [] };
+	} else return false;
+	pushZodV4Field(fields, prefix, fieldType, required, buildV4Metadata(def, ctx, extra));
+	return true;
+}
 
-	// Leaf types
-	if (prefix) {
-		const fieldType = mapZodV4Type(type);
-		const metadata = buildV4Metadata(def, ctx);
-		fields.push({
-			path: prefix,
-			type: fieldType,
-			required,
-			...(ctx.defaultValue !== undefined ? { defaultValue: ctx.defaultValue } : {}),
-			...(metadata ? { metadata } : {}),
-		});
-	}
+function pushZodV4Field(
+	fields: SchemaFieldInfo[],
+	path: string,
+	type: SchemaFieldType,
+	required: boolean,
+	metadata?: SchemaFieldMetadata,
+	defaultValue?: unknown,
+): void {
+	if (!path) return;
+	fields.push({
+		path,
+		type,
+		required,
+		...(defaultValue !== undefined ? { defaultValue } : {}),
+		...(metadata ? { metadata } : {}),
+	});
 }
 
 function walkZodV4Inner(
@@ -209,7 +215,6 @@ function mapZodV4Type(type: string): SchemaFieldType {
 function extractV4Checks(def: Readonly<Record<string, unknown>>): Record<string, unknown> {
 	const checks = def.checks as readonly Record<string, unknown>[] | undefined;
 	if (!checks || checks.length === 0) return {};
-
 	const result: Record<string, unknown> = {};
 	for (const check of checks) {
 		const kind = check.kind as string | undefined;

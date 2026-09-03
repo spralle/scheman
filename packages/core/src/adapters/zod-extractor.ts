@@ -55,169 +55,143 @@ function walkZodSchema(
 	if (!def) return;
 
 	const typeName = def.typeName ?? "";
+	if (walkZodPresenceWrapper(def, typeName, prefix, fields, required, ctx)) return;
+	if (walkZodTransparentWrapper(def, typeName, prefix, fields, required, ctx)) return;
+	if (walkZodStructure(schema, def, typeName, prefix, fields, required, ctx)) return;
+	if (walkZodSpecialLeaf(schema, def, typeName, prefix, fields, required, ctx)) return;
 
+	pushZodField(fields, prefix, mapZodType(typeName), required, mergeZodMetadata(schema, ctx), ctx.defaultValue);
+}
+
+function walkZodPresenceWrapper(
+	def: ZodTypeDef & Record<string, unknown>,
+	typeName: string,
+	prefix: string,
+	fields: SchemaFieldInfo[],
+	required: boolean,
+	ctx: WalkContext,
+): boolean {
+	const inner = def.innerType as ZodLike | undefined;
 	if (typeName === "ZodOptional") {
-		const inner = def.innerType as ZodLike | undefined;
-		if (inner) {
-			walkZodSchema(inner, prefix, fields, false);
-		}
-		return;
+		if (inner) walkZodSchema(inner, prefix, fields, false);
+		return true;
 	}
-
 	if (typeName === "ZodNullable") {
-		const inner = def.innerType as ZodLike | undefined;
-		if (inner) {
-			walkZodSchema(inner, prefix, fields, required, { ...ctx, nullable: true });
-		}
-		return;
+		if (inner) walkZodSchema(inner, prefix, fields, required, { ...ctx, nullable: true });
+		return true;
 	}
+	if (typeName !== "ZodDefault") return false;
+	const defaultValue = typeof def.defaultValue === "function" ? (def.defaultValue as () => unknown)() : undefined;
+	if (inner) walkZodSchema(inner, prefix, fields, false, { defaultValue });
+	return true;
+}
 
-	if (typeName === "ZodDefault") {
-		const inner = def.innerType as ZodLike | undefined;
-		const defaultValue = typeof def.defaultValue === "function" ? (def.defaultValue as () => unknown)() : undefined;
-		if (inner) {
-			walkZodSchema(inner, prefix, fields, false, { defaultValue });
-		}
-		return;
-	}
-
-	if (typeName === "ZodEffects") {
-		const inner = def.schema as ZodLike | undefined;
-		if (inner) {
-			walkZodSchema(inner, prefix, fields, required);
-		}
-		return;
-	}
-
-	if (typeName === "ZodPipeline") {
-		const inner = def.in as ZodLike | undefined;
-		if (inner) {
-			walkZodSchema(inner, prefix, fields, required);
-		}
-		return;
-	}
-
+function walkZodTransparentWrapper(
+	def: ZodTypeDef & Record<string, unknown>,
+	typeName: string,
+	prefix: string,
+	fields: SchemaFieldInfo[],
+	required: boolean,
+	ctx: WalkContext,
+): boolean {
+	const innerKeys: Readonly<Record<string, string>> = {
+		ZodEffects: "schema",
+		ZodPipeline: "in",
+		ZodBranded: "type",
+		ZodCatch: "innerType",
+		ZodReadonly: "innerType",
+	};
 	if (typeName === "ZodLazy") {
 		const getter = def.getter as (() => ZodLike) | undefined;
-		if (getter) {
-			walkZodSchema(getter(), prefix, fields, required);
-		}
-		return;
+		if (getter) walkZodSchema(getter(), prefix, fields, required);
+		return true;
 	}
+	const innerKey = innerKeys[typeName];
+	if (!innerKey) return false;
+	const inner = def[innerKey] as ZodLike | undefined;
+	const nextCtx = typeName === "ZodReadonly" ? { ...ctx, readOnly: true } : undefined;
+	if (inner) walkZodSchema(inner, prefix, fields, required, nextCtx);
+	return true;
+}
 
-	if (typeName === "ZodBranded") {
-		const inner = def.type as ZodLike | undefined;
-		if (inner) {
-			walkZodSchema(inner, prefix, fields, required);
-		}
-		return;
-	}
-
-	if (typeName === "ZodCatch") {
-		const inner = def.innerType as ZodLike | undefined;
-		if (inner) {
-			walkZodSchema(inner, prefix, fields, required);
-		}
-		return;
-	}
-
-	if (typeName === "ZodReadonly") {
-		const inner = def.innerType as ZodLike | undefined;
-		if (inner) {
-			walkZodSchema(inner, prefix, fields, required, { ...ctx, readOnly: true });
-		}
-		return;
-	}
-
+function walkZodStructure(
+	schema: ZodLike,
+	def: ZodTypeDef & Record<string, unknown>,
+	typeName: string,
+	prefix: string,
+	fields: SchemaFieldInfo[],
+	required: boolean,
+	ctx: WalkContext,
+): boolean {
 	if (typeName === "ZodObject") {
 		const shape = def.shape as Record<string, ZodLike> | (() => Record<string, ZodLike>) | undefined;
 		const resolvedShape = typeof shape === "function" ? shape() : shape;
-		if (resolvedShape) {
-			for (const [key, value] of Object.entries(resolvedShape)) {
-				const childPath = prefix ? `${prefix}.${key}` : key;
-				walkZodSchema(value, childPath, fields, true);
-			}
+		for (const [key, value] of Object.entries(resolvedShape ?? {})) {
+			walkZodSchema(value, prefix ? `${prefix}.${key}` : key, fields, true);
 		}
-		return;
+		return true;
 	}
-
 	if (typeName === "ZodArray") {
-		const metadata = mergeZodMetadata(schema, ctx);
-		fields.push({
-			path: prefix,
-			type: "array",
-			required,
-			...(ctx.defaultValue !== undefined ? { defaultValue: ctx.defaultValue } : {}),
-			...(metadata ? { metadata } : {}),
-		});
-		return;
+		pushZodField(fields, prefix, "array", required, mergeZodMetadata(schema, ctx), ctx.defaultValue, true);
+		return true;
 	}
+	if (typeName !== "ZodIntersection") return false;
+	const left = def.left as ZodLike | undefined;
+	const right = def.right as ZodLike | undefined;
+	if (left) walkZodSchema(left, prefix, fields, required, ctx);
+	if (right) walkZodSchema(right, prefix, fields, required, ctx);
+	return true;
+}
 
+function walkZodSpecialLeaf(
+	schema: ZodLike,
+	def: ZodTypeDef & Record<string, unknown>,
+	typeName: string,
+	prefix: string,
+	fields: SchemaFieldInfo[],
+	required: boolean,
+	ctx: WalkContext,
+): boolean {
+	let type: SchemaFieldType;
+	let extra: Record<string, unknown> | undefined;
 	if (typeName === "ZodLiteral") {
 		const value = def.value;
-		const literalType = typeof value === "number" ? "number" : typeof value === "boolean" ? "boolean" : "string";
-		const metadata = mergeZodMetadata(schema, ctx, { const: value });
-		if (prefix) {
-			fields.push({ path: prefix, type: literalType as SchemaFieldType, required, ...(metadata ? { metadata } : {}) });
-		}
-		return;
-	}
-
-	if (typeName === "ZodNativeEnum") {
+		type = typeof value === "number" ? "number" : typeof value === "boolean" ? "boolean" : "string";
+		extra = { const: value };
+	} else if (typeName === "ZodNativeEnum") {
 		const values = def.values as Record<string, unknown> | undefined;
-		const enumValues = values ? Object.values(values) : [];
-		const metadata = mergeZodMetadata(schema, ctx, { enum: enumValues });
-		if (prefix) {
-			fields.push({ path: prefix, type: "enum", required, ...(metadata ? { metadata } : {}) });
-		}
-		return;
-	}
+		type = "enum";
+		extra = { enum: values ? Object.values(values) : [] };
+	} else if (typeName === "ZodRecord") {
+		type = "object";
+		extra = { additionalProperties: true };
+	} else if (typeName === "ZodTuple") {
+		type = "array";
+		extra = { tuple: true, itemCount: (def.items as readonly ZodLike[] | undefined)?.length ?? 0 };
+	} else if (typeName === "ZodBigInt") {
+		type = "integer";
+	} else return false;
+	pushZodField(fields, prefix, type, required, mergeZodMetadata(schema, ctx, extra));
+	return true;
+}
 
-	if (typeName === "ZodIntersection") {
-		const left = def.left as ZodLike | undefined;
-		const right = def.right as ZodLike | undefined;
-		if (left) walkZodSchema(left, prefix, fields, required, ctx);
-		if (right) walkZodSchema(right, prefix, fields, required, ctx);
-		return;
-	}
-
-	if (typeName === "ZodRecord") {
-		const metadata = mergeZodMetadata(schema, ctx, { additionalProperties: true });
-		if (prefix) {
-			fields.push({ path: prefix, type: "object", required, ...(metadata ? { metadata } : {}) });
-		}
-		return;
-	}
-
-	if (typeName === "ZodTuple") {
-		const items = def.items as readonly ZodLike[] | undefined;
-		const metadata = mergeZodMetadata(schema, ctx, { tuple: true, itemCount: items?.length ?? 0 });
-		if (prefix) {
-			fields.push({ path: prefix, type: "array", required, ...(metadata ? { metadata } : {}) });
-		}
-		return;
-	}
-
-	if (typeName === "ZodBigInt") {
-		const metadata = mergeZodMetadata(schema, ctx);
-		if (prefix) {
-			fields.push({ path: prefix, type: "integer", required, ...(metadata ? { metadata } : {}) });
-		}
-		return;
-	}
-
-	const fieldType = mapZodType(typeName);
-	const metadata = mergeZodMetadata(schema, ctx);
-
-	if (prefix) {
-		fields.push({
-			path: prefix,
-			type: fieldType,
-			required,
-			...(ctx.defaultValue !== undefined ? { defaultValue: ctx.defaultValue } : {}),
-			...(metadata ? { metadata } : {}),
-		});
-	}
+function pushZodField(
+	fields: SchemaFieldInfo[],
+	path: string,
+	type: SchemaFieldType,
+	required: boolean,
+	metadata?: SchemaFieldMetadata,
+	defaultValue?: unknown,
+	allowEmptyPath = false,
+): void {
+	if (!path && !allowEmptyPath) return;
+	fields.push({
+		path,
+		type,
+		required,
+		...(defaultValue !== undefined ? { defaultValue } : {}),
+		...(metadata ? { metadata } : {}),
+	});
 }
 
 function mapZodType(typeName: string): SchemaFieldType {
