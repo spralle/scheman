@@ -53,6 +53,7 @@ function walkZodV4(
 	if (walkZodV4Wrapper(def, type, prefix, fields, required, ctx)) return;
 	if (walkZodV4Structure(def, type, prefix, fields, required, ctx)) return;
 	if (walkZodV4SpecialLeaf(def, type, prefix, fields, required, ctx)) return;
+	if (!prefix) return;
 	pushZodV4Field(fields, prefix, mapZodV4Type(type), required, buildV4Metadata(def, ctx), ctx.defaultValue);
 }
 
@@ -217,49 +218,52 @@ function extractV4Checks(def: Readonly<Record<string, unknown>>): Record<string,
 	const result: Record<string, unknown> = {};
 	for (const check of checks) {
 		const kind = check.kind as string | undefined;
-		if (!kind) continue;
-		switch (kind) {
-			case "min":
-				result.minLength = check.value;
-				break;
-			case "max":
-				result.maxLength = check.value;
-				break;
-			case "length":
-				result.minLength = check.value;
-				result.maxLength = check.value;
-				break;
-			case "regex":
-				result.pattern = String(check.regex);
-				break;
-			case "email":
-			case "url":
-			case "uuid":
-			case "cuid":
-				result.format = kind;
-				break;
-			case "gte":
-			case "min_value":
-				result.minimum = check.value;
-				break;
-			case "lte":
-			case "max_value":
-				result.maximum = check.value;
-				break;
-			case "gt":
-				result.exclusiveMinimum = check.value;
-				break;
-			case "lt":
-				result.exclusiveMaximum = check.value;
-				break;
-			case "int":
-				result.format = "int";
-				break;
-			default:
-				result[kind] = check.value ?? true;
-		}
+		if (kind) applyV4Check(result, check, kind);
 	}
 	return result;
+}
+
+function applyV4Check(result: Record<string, unknown>, check: Record<string, unknown>, kind: string): void {
+	switch (kind) {
+		case "min":
+			result.minLength = check.value;
+			break;
+		case "max":
+			result.maxLength = check.value;
+			break;
+		case "length":
+			result.minLength = check.value;
+			result.maxLength = check.value;
+			break;
+		case "regex":
+			result.pattern = String(check.regex);
+			break;
+		case "email":
+		case "url":
+		case "uuid":
+		case "cuid":
+			result.format = kind;
+			break;
+		case "gte":
+		case "min_value":
+			result.minimum = check.value;
+			break;
+		case "lte":
+		case "max_value":
+			result.maximum = check.value;
+			break;
+		case "gt":
+			result.exclusiveMinimum = check.value;
+			break;
+		case "lt":
+			result.exclusiveMaximum = check.value;
+			break;
+		case "int":
+			result.format = "int";
+			break;
+		default:
+			result[kind] = check.value ?? true;
+	}
 }
 
 /** Build metadata from v4 def, context, and extras */

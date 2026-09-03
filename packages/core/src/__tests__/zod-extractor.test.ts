@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { extractFromZod } from "../adapters/zod-extractor.js";
+import { extractFromZodV4 } from "../adapters/zod4-extractor.js";
 
 function zodV3(typeName: string, extra: Record<string, unknown> = {}) {
 	return {
@@ -259,5 +260,21 @@ describe("extractFromZod", () => {
 			const result = extractFromZod(schema);
 			expect(result.fields[0]?.metadata?.extensions).toEqual({ "x-custom": { foo: "bar" } });
 		});
+	});
+});
+
+describe("extractFromZodV4", () => {
+	it("does not evaluate ordinary leaf metadata for a root schema", () => {
+		let metadataReads = 0;
+		const def = {
+			type: "string",
+			get metadata() {
+				metadataReads += 1;
+				return { formbar: { widget: "text" } };
+			},
+		};
+
+		expect(extractFromZodV4({ _zod: { def } })).toEqual({ fields: [], metadata: { vendor: "zod4" } });
+		expect(metadataReads).toBe(0);
 	});
 });
