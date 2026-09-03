@@ -50,7 +50,7 @@ export interface SchemaFieldMetadata {
 	readonly tuple?: boolean;
 	readonly const?: unknown;
 	readonly variants?: readonly unknown[];
-	// Vendor extension data (JSON Schema: x-* keys; Zod: .meta({ vendor: {...} }))
+	// Vendor extension data (JSON Schema: x-* keys; Zod: object-valued .meta() namespaces)
 	readonly extensions?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 	// Display label (from x-* extensions or schema extractors)
 	readonly label?: string;

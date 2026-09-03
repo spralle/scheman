@@ -245,7 +245,7 @@ describe("extractFromZod", () => {
 			});
 		});
 
-		it("ignores non-object metadata values", () => {
+		it("ignores top-level non-object metadata values", () => {
 			const schema = zodV3Object({
 				name: zodV3("ZodString", { metadata: { label: "Name", count: 42 } }),
 			});
