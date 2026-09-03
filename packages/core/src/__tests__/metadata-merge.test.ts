@@ -2,6 +2,19 @@ import { describe, expect, it } from "vitest";
 import { SchemaError } from "../errors.js";
 import { mergeMetadata, mergeSamePrecedence, structuralEqual } from "../metadata-merge.js";
 
+function expectMetadataConflict(run: () => unknown, message: string): void {
+	let error: unknown;
+	try {
+		run();
+	} catch (caught) {
+		error = caught;
+	}
+
+	expect(error).toBeInstanceOf(SchemaError);
+	expect(error).toMatchObject({ code: "SCHEMA_META_CONFLICT" });
+	expect((error as SchemaError).message).toBe(message);
+}
+
 describe("mergeMetadata", () => {
 	it("returns empty object for empty input", () => {
 		expect(mergeMetadata({})).toEqual({});
@@ -80,19 +93,24 @@ describe("mergeSamePrecedence", () => {
 	});
 
 	it("throws SCHEMA_META_CONFLICT for different scalars", () => {
-		expect(() => mergeSamePrecedence({ a: 1 }, { a: 2 })).toThrow(
-			expect.objectContaining({ code: "SCHEMA_META_CONFLICT" }),
+		expectMetadataConflict(
+			() => mergeSamePrecedence({ a: 1 }, { a: 2 }),
+			'Metadata conflict at key "a": incompatible values at same precedence',
 		);
 	});
 
 	it("throws SCHEMA_META_CONFLICT for different arrays", () => {
-		expect(() => mergeSamePrecedence({ a: [1] }, { a: [2] })).toThrow(
-			expect.objectContaining({ code: "SCHEMA_META_CONFLICT" }),
+		expectMetadataConflict(
+			() => mergeSamePrecedence({ a: [1] }, { a: [2] }),
+			'Metadata conflict at key "a": incompatible values at same precedence',
 		);
 	});
 
 	it("throws SCHEMA_META_CONFLICT for nested sub-conflicts", () => {
-		expect(() => mergeSamePrecedence({ nested: { x: 1 } }, { nested: { x: 2 } })).toThrow(SchemaError);
+		expectMetadataConflict(
+			() => mergeSamePrecedence({ nested: { x: 1 } }, { nested: { x: 2 } }),
+			'Metadata conflict at key "x": incompatible values at same precedence',
+		);
 	});
 });
 

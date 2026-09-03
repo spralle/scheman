@@ -135,6 +135,52 @@ describe("ingestSchema", () => {
 		});
 	});
 
+	it("ingests nested fields through a local JSON Schema $ref", () => {
+		const schema = {
+			$schema: "https://json-schema.org/draft/2020-12/schema",
+			title: "Customer",
+			type: "object",
+			$defs: {
+				address: {
+					type: "object",
+					properties: {
+						street: { type: "string", minLength: 1 },
+						location: {
+							type: "object",
+							properties: {
+								latitude: { type: "number", minimum: -90, maximum: 90 },
+								longitude: { type: "number", minimum: -180, maximum: 180 },
+							},
+							required: ["latitude"],
+						},
+					},
+					required: ["street", "location"],
+				},
+			},
+			properties: { address: { $ref: "#/$defs/address" } },
+			required: ["address"],
+		};
+
+		expect(ingestSchema(schema)).toEqual({
+			fields: [
+				{ path: "address.street", type: "string", required: true, metadata: { minLength: 1 } },
+				{
+					path: "address.location.latitude",
+					type: "number",
+					required: true,
+					metadata: { minimum: -90, maximum: 90 },
+				},
+				{
+					path: "address.location.longitude",
+					type: "number",
+					required: false,
+					metadata: { minimum: -180, maximum: 180 },
+				},
+			],
+			metadata: { vendor: "json-schema", title: "Customer" },
+		});
+	});
+
 	it("handles JSON Schema with enum, format, and default values", () => {
 		const schema = {
 			type: "object",
