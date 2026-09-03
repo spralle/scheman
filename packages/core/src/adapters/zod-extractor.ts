@@ -6,7 +6,7 @@ import type {
 	SchemaIngestionResult,
 	SchemaMetadata,
 } from "../types.js";
-import { enumValues, mergeZodMetadata as mergeMetadataLayers, readZodMetadata } from "./zod-metadata.js";
+import { mergeZodMetadata as mergeMetadataLayers, readZodMetadata, zodV3EnumValues } from "./zod-metadata.js";
 
 // Zod internal types for duck-typed traversal (Zod has no formal traversal API)
 interface ZodTypeDef {
@@ -44,6 +44,7 @@ interface WalkContext {
 	nullable?: boolean;
 	readOnly?: boolean;
 	defaultValue?: unknown;
+	lowerMetadata?: SchemaFieldMetadata;
 	metadata?: SchemaFieldMetadata;
 	active: WeakSet<object>;
 }
@@ -118,6 +119,15 @@ function walkZodTransparentWrapper(
 		if (getter) walkZodSchema(getter(), prefix, fields, required, withWrapperMetadata(schema, ctx));
 		return true;
 	}
+	if (typeName === "ZodPipeline") {
+		// Fields describe accepted input, so input metadata overrides output metadata; wrappers remain highest.
+		const outputMetadata = collectZodMetadata(def.out, new WeakSet());
+		const lowerMetadata = mergeMetadataLayers(ctx.lowerMetadata, outputMetadata);
+		const wrapperCtx = withWrapperMetadata(schema, withLowerMetadata(ctx, lowerMetadata));
+		const input = def.in as ZodLike | undefined;
+		if (input) walkZodSchema(input, prefix, fields, required, wrapperCtx);
+		return true;
+	}
 	const innerKey = innerKeys[typeName];
 	if (!innerKey) return false;
 	const inner = def[innerKey] as ZodLike | undefined;
@@ -173,7 +183,7 @@ function walkZodSpecialLeaf(
 		extra = { const: value };
 	} else if (typeName === "ZodNativeEnum") {
 		type = "enum";
-		extra = { enum: enumValues(def.values) ?? [] };
+		extra = { enum: zodV3EnumValues(def.values) ?? [] };
 	} else if (typeName === "ZodRecord") {
 		type = "object";
 		extra = { additionalProperties: true };
@@ -301,7 +311,7 @@ function buildZodMetadata(
 
 	// Enum values
 	if (def.typeName === "ZodEnum") {
-		result.enum = enumValues(def.values) ?? [];
+		result.enum = zodV3EnumValues(def.values) ?? [];
 	}
 
 	// Context flags
@@ -313,11 +323,48 @@ function buildZodMetadata(
 
 	const inferred = Object.keys(result).length ? (result as SchemaFieldMetadata) : undefined;
 	const local = mergeMetadataLayers(readZodMetadata(schema, def), inferred);
-	return mergeMetadataLayers(local, ctx.metadata);
+	const withLower = mergeMetadataLayers(ctx.lowerMetadata, local);
+	return mergeMetadataLayers(withLower, ctx.metadata);
 }
 
 function withWrapperMetadata(schema: ZodLike, ctx: WalkContext): WalkContext {
 	const metadata = schema._def ? readZodMetadata(schema, schema._def) : undefined;
 	const merged = mergeMetadataLayers(metadata, ctx.metadata);
 	return merged ? { ...ctx, metadata: merged } : ctx;
+}
+
+function withLowerMetadata(ctx: WalkContext, metadata?: SchemaFieldMetadata): WalkContext {
+	return metadata ? { ...ctx, lowerMetadata: metadata } : ctx;
+}
+
+function collectZodMetadata(schema: unknown, active: WeakSet<object>): SchemaFieldMetadata | undefined {
+	if (!isObject(schema) || active.has(schema)) return undefined;
+	active.add(schema);
+	try {
+		const def = (schema as ZodLike)._def;
+		if (!def) return undefined;
+
+		const typeName = def.typeName ?? "";
+		if (typeName === "ZodPipeline") {
+			const output = collectZodMetadata(def.out, active);
+			const input = collectZodMetadata(def.in, active);
+			return mergeMetadataLayers(mergeMetadataLayers(output, input), readZodMetadata(schema, def));
+		}
+		const key = metadataInnerKey(typeName);
+		const inner = key ? collectZodMetadata(def[key], active) : undefined;
+		return mergeMetadataLayers(inner, readZodMetadata(schema, def));
+	} finally {
+		active.delete(schema);
+	}
+}
+
+function metadataInnerKey(typeName: string): string | undefined {
+	if (["ZodOptional", "ZodNullable", "ZodDefault", "ZodCatch", "ZodReadonly"].includes(typeName)) return "innerType";
+	if (typeName === "ZodEffects") return "schema";
+	if (typeName === "ZodBranded") return "type";
+	return undefined;
+}
+
+function isObject(value: unknown): value is object {
+	return value !== null && typeof value === "object";
 }
