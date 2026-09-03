@@ -1,0 +1,57 @@
+import { mergeMetadata } from "../metadata-merge.js";
+import type { SchemaFieldMetadata } from "../types.js";
+
+export type ZodDef = Readonly<Record<string, unknown>>;
+
+interface MetadataCarrier {
+	readonly meta?: () => unknown;
+}
+
+export function readZodMetadata(schema: unknown, def: ZodDef): SchemaFieldMetadata | undefined {
+	const carrier = schema as MetadataCarrier;
+	const registered = typeof carrier.meta === "function" ? carrier.meta() : undefined;
+	const raw = isRecord(registered) ? registered : isRecord(def.metadata) ? def.metadata : undefined;
+	const description = typeof def.description === "string" ? def.description : raw?.description;
+	const result: Record<string, unknown> = {};
+
+	if (typeof raw?.title === "string") result.title = raw.title;
+	if (typeof description === "string") result.description = description;
+	if (raw) result.extensions = raw;
+
+	return Object.keys(result).length ? (result as SchemaFieldMetadata) : undefined;
+}
+
+export function mergeZodMetadata(
+	lower?: SchemaFieldMetadata,
+	higher?: SchemaFieldMetadata,
+): SchemaFieldMetadata | undefined {
+	if (!lower) return higher;
+	if (!higher) return lower;
+	return mergeMetadata({
+		embedded: lower as unknown as Readonly<Record<string, unknown>>,
+		external: higher as unknown as Readonly<Record<string, unknown>>,
+	}) as SchemaFieldMetadata;
+}
+
+export function enumValues(entries: unknown): readonly unknown[] | undefined {
+	if (Array.isArray(entries)) return entries.filter(isPrimitive);
+	if (!isRecord(entries)) return undefined;
+
+	return Object.keys(entries)
+		.filter((key) => !isReverseEnumEntry(entries, key))
+		.map((key) => entries[key])
+		.filter(isPrimitive);
+}
+
+function isReverseEnumEntry(entries: Readonly<Record<string, unknown>>, key: string): boolean {
+	const value = entries[key];
+	return typeof value === "string" && typeof entries[value] === "number";
+}
+
+function isPrimitive(value: unknown): value is string | number {
+	return typeof value === "string" || typeof value === "number";
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}

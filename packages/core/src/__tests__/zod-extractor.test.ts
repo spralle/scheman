@@ -245,12 +245,12 @@ describe("extractFromZod", () => {
 			});
 		});
 
-		it("ignores non-object metadata values", () => {
+		it("preserves non-object metadata values", () => {
 			const schema = zodV3Object({
 				name: zodV3("ZodString", { metadata: { label: "Name", count: 42 } }),
 			});
 			const result = extractFromZod(schema);
-			expect(result.fields[0]?.metadata?.extensions).toBeUndefined();
+			expect(result.fields[0]?.metadata?.extensions).toEqual({ label: "Name", count: 42 });
 		});
 
 		it("does not throw on x-vendor keys in meta", () => {

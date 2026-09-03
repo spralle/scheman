@@ -6,6 +6,7 @@ import type {
 	SchemaIngestionResult,
 	SchemaMetadata,
 } from "../types.js";
+import { enumValues, mergeZodMetadata as mergeMetadataLayers, readZodMetadata } from "./zod-metadata.js";
 
 // Zod internal types for duck-typed traversal (Zod has no formal traversal API)
 interface ZodTypeDef {
@@ -28,13 +29,13 @@ export function extractFromZod(schema: unknown): SchemaIngestionResult {
 	const fields: SchemaFieldInfo[] = [];
 
 	const rootDef = zodSchema._def;
-	const rootExtensions = rootDef ? extractVendorExtensions(rootDef) : undefined;
+	const rootMetadata = readZodMetadata(zodSchema, rootDef);
 	const metadata: SchemaMetadata = {
 		vendor: "zod",
-		...(rootExtensions ? { extra: rootExtensions as unknown as Readonly<Record<string, unknown>> } : {}),
+		...(rootMetadata?.extensions ? { extra: rootMetadata.extensions } : {}),
 	};
 
-	walkZodSchema(zodSchema, "", fields, true);
+	walkZodSchema(zodSchema, "", fields, true, { active: new WeakSet() });
 
 	return { fields, metadata };
 }
@@ -43,6 +44,8 @@ interface WalkContext {
 	nullable?: boolean;
 	readOnly?: boolean;
 	defaultValue?: unknown;
+	metadata?: SchemaFieldMetadata;
+	active: WeakSet<object>;
 }
 
 function walkZodSchema(
@@ -50,21 +53,27 @@ function walkZodSchema(
 	prefix: string,
 	fields: SchemaFieldInfo[],
 	required: boolean,
-	ctx: WalkContext = {},
+	ctx: WalkContext,
 ): void {
 	const def = schema._def;
 	if (!def) return;
+	if (ctx.active.has(schema)) return;
+	ctx.active.add(schema);
 
-	const typeName = def.typeName ?? "";
-	if (walkZodPresenceWrapper(def, typeName, prefix, fields, required, ctx)) return;
-	if (walkZodTransparentWrapper(def, typeName, prefix, fields, required, ctx)) return;
-	if (walkZodStructure(schema, def, typeName, prefix, fields, required, ctx)) return;
-	if (walkZodSpecialLeaf(schema, def, typeName, prefix, fields, required, ctx)) return;
-
-	pushZodField(fields, prefix, mapZodType(typeName), required, mergeZodMetadata(schema, ctx), ctx.defaultValue);
+	try {
+		const typeName = def.typeName ?? "";
+		if (walkZodPresenceWrapper(schema, def, typeName, prefix, fields, required, ctx)) return;
+		if (walkZodTransparentWrapper(schema, def, typeName, prefix, fields, required, ctx)) return;
+		if (walkZodStructure(schema, def, typeName, prefix, fields, required, ctx)) return;
+		if (walkZodSpecialLeaf(schema, def, typeName, prefix, fields, required, ctx)) return;
+		pushZodField(fields, prefix, mapZodType(typeName), required, buildZodMetadata(schema, ctx), ctx.defaultValue);
+	} finally {
+		ctx.active.delete(schema);
+	}
 }
 
 function walkZodPresenceWrapper(
+	schema: ZodLike,
 	def: ZodTypeDef & Record<string, unknown>,
 	typeName: string,
 	prefix: string,
@@ -72,22 +81,24 @@ function walkZodPresenceWrapper(
 	required: boolean,
 	ctx: WalkContext,
 ): boolean {
+	if (typeName !== "ZodOptional" && typeName !== "ZodNullable" && typeName !== "ZodDefault") return false;
 	const inner = def.innerType as ZodLike | undefined;
+	const nextCtx = withWrapperMetadata(schema, ctx);
 	if (typeName === "ZodOptional") {
-		if (inner) walkZodSchema(inner, prefix, fields, false);
+		if (inner) walkZodSchema(inner, prefix, fields, false, nextCtx);
 		return true;
 	}
 	if (typeName === "ZodNullable") {
-		if (inner) walkZodSchema(inner, prefix, fields, required, { ...ctx, nullable: true });
+		if (inner) walkZodSchema(inner, prefix, fields, required, { ...nextCtx, nullable: true });
 		return true;
 	}
-	if (typeName !== "ZodDefault") return false;
 	const defaultValue = typeof def.defaultValue === "function" ? (def.defaultValue as () => unknown)() : undefined;
-	if (inner) walkZodSchema(inner, prefix, fields, false, { defaultValue });
+	if (inner) walkZodSchema(inner, prefix, fields, false, { ...nextCtx, defaultValue });
 	return true;
 }
 
 function walkZodTransparentWrapper(
+	schema: ZodLike,
 	def: ZodTypeDef & Record<string, unknown>,
 	typeName: string,
 	prefix: string,
@@ -104,13 +115,14 @@ function walkZodTransparentWrapper(
 	};
 	if (typeName === "ZodLazy") {
 		const getter = def.getter as (() => ZodLike) | undefined;
-		if (getter) walkZodSchema(getter(), prefix, fields, required);
+		if (getter) walkZodSchema(getter(), prefix, fields, required, withWrapperMetadata(schema, ctx));
 		return true;
 	}
 	const innerKey = innerKeys[typeName];
 	if (!innerKey) return false;
 	const inner = def[innerKey] as ZodLike | undefined;
-	const nextCtx = typeName === "ZodReadonly" ? { ...ctx, readOnly: true } : undefined;
+	const wrapperCtx = withWrapperMetadata(schema, ctx);
+	const nextCtx = typeName === "ZodReadonly" ? { ...wrapperCtx, readOnly: true } : wrapperCtx;
 	if (inner) walkZodSchema(inner, prefix, fields, required, nextCtx);
 	return true;
 }
@@ -128,12 +140,12 @@ function walkZodStructure(
 		const shape = def.shape as Record<string, ZodLike> | (() => Record<string, ZodLike>) | undefined;
 		const resolvedShape = typeof shape === "function" ? shape() : shape;
 		for (const [key, value] of Object.entries(resolvedShape ?? {})) {
-			walkZodSchema(value, prefix ? `${prefix}.${key}` : key, fields, true);
+			walkZodSchema(value, prefix ? `${prefix}.${key}` : key, fields, true, { active: ctx.active });
 		}
 		return true;
 	}
 	if (typeName === "ZodArray") {
-		pushZodField(fields, prefix, "array", required, mergeZodMetadata(schema, ctx), ctx.defaultValue, true);
+		pushZodField(fields, prefix, "array", required, buildZodMetadata(schema, ctx), ctx.defaultValue, true);
 		return true;
 	}
 	if (typeName !== "ZodIntersection") return false;
@@ -160,9 +172,8 @@ function walkZodSpecialLeaf(
 		type = typeof value === "number" ? "number" : typeof value === "boolean" ? "boolean" : "string";
 		extra = { const: value };
 	} else if (typeName === "ZodNativeEnum") {
-		const values = def.values as Record<string, unknown> | undefined;
 		type = "enum";
-		extra = { enum: values ? Object.values(values) : [] };
+		extra = { enum: enumValues(def.values) ?? [] };
 	} else if (typeName === "ZodRecord") {
 		type = "object";
 		extra = { additionalProperties: true };
@@ -172,7 +183,7 @@ function walkZodSpecialLeaf(
 	} else if (typeName === "ZodBigInt") {
 		type = "integer";
 	} else return false;
-	pushZodField(fields, prefix, type, required, mergeZodMetadata(schema, ctx, extra));
+	pushZodField(fields, prefix, type, required, buildZodMetadata(schema, ctx, extra));
 	return true;
 }
 
@@ -217,24 +228,6 @@ function mapZodType(typeName: string): SchemaFieldType {
 		default:
 			return "unknown";
 	}
-}
-
-/** Extract all object-valued keys from .meta({...}) as vendor extensions */
-function extractVendorExtensions(
-	def: ZodTypeDef & Record<string, unknown>,
-): Record<string, Record<string, unknown>> | undefined {
-	const rawMeta = def.metadata as Record<string, unknown> | undefined;
-	if (!rawMeta || typeof rawMeta !== "object") return undefined;
-
-	const extensions: Record<string, Record<string, unknown>> = {};
-
-	for (const [key, value] of Object.entries(rawMeta)) {
-		if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-			extensions[key] = value as Record<string, unknown>;
-		}
-	}
-
-	return Object.keys(extensions).length > 0 ? extensions : undefined;
 }
 
 /** Extract validation checks from Zod _def.checks array */
@@ -289,13 +282,13 @@ function extractZodChecks(def: ZodTypeDef & Record<string, unknown>): Record<str
 }
 
 /** Merge vendor extensions, checks, description, and context into SchemaFieldMetadata */
-function mergeZodMetadata(
+function buildZodMetadata(
 	schema: ZodLike,
 	ctx: WalkContext,
 	extra?: Record<string, unknown>,
 ): SchemaFieldMetadata | undefined {
 	const def = schema._def;
-	if (!def) return extra ? (extra as SchemaFieldMetadata) : undefined;
+	if (!def) return mergeMetadataLayers(extra as SchemaFieldMetadata | undefined, ctx.metadata);
 
 	const result: Record<string, unknown> = {};
 
@@ -307,8 +300,8 @@ function mergeZodMetadata(
 	Object.assign(result, checks);
 
 	// Enum values
-	if (def.values && def.typeName === "ZodEnum") {
-		result.enum = def.values;
+	if (def.typeName === "ZodEnum") {
+		result.enum = enumValues(def.values) ?? [];
 	}
 
 	// Context flags
@@ -318,12 +311,13 @@ function mergeZodMetadata(
 	// Extra type-specific metadata
 	if (extra) Object.assign(result, extra);
 
-	// Vendor extensions (from .meta({ vendor: {...} })) → extensions.*
-	const extensions = extractVendorExtensions(def);
-	if (extensions) {
-		const existing = result.extensions as Record<string, Readonly<Record<string, unknown>>> | undefined;
-		result.extensions = { ...existing, ...extensions };
-	}
+	const inferred = Object.keys(result).length ? (result as SchemaFieldMetadata) : undefined;
+	const local = mergeMetadataLayers(readZodMetadata(schema, def), inferred);
+	return mergeMetadataLayers(local, ctx.metadata);
+}
 
-	return Object.keys(result).length > 0 ? (result as SchemaFieldMetadata) : undefined;
+function withWrapperMetadata(schema: ZodLike, ctx: WalkContext): WalkContext {
+	const metadata = schema._def ? readZodMetadata(schema, schema._def) : undefined;
+	const merged = mergeMetadataLayers(metadata, ctx.metadata);
+	return merged ? { ...ctx, metadata: merged } : ctx;
 }

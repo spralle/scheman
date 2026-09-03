@@ -5,6 +5,7 @@ import type {
 	SchemaIngestionResult,
 	SchemaMetadata,
 } from "../types.js";
+import { type ZodDef, enumValues, mergeZodMetadata, readZodMetadata } from "./zod-metadata.js";
 
 /**
  * Zod v4 introspection interfaces. v4 replaces `_def` with a `_zod` property
@@ -22,6 +23,8 @@ interface WalkContext {
 	nullable?: boolean;
 	readOnly?: boolean;
 	defaultValue?: unknown;
+	metadata?: SchemaFieldMetadata;
+	active: WeakSet<object>;
 }
 
 export function extractFromZodV4(schema: unknown): SchemaIngestionResult {
@@ -33,7 +36,7 @@ export function extractFromZodV4(schema: unknown): SchemaIngestionResult {
 	}
 
 	const metadata: SchemaMetadata = { vendor: "zod4" };
-	walkZodV4(schema, "", fields, true);
+	walkZodV4(schema, "", fields, true, { active: new WeakSet() });
 	return { fields, metadata };
 }
 
@@ -42,22 +45,28 @@ function walkZodV4(
 	prefix: string,
 	fields: SchemaFieldInfo[],
 	required: boolean,
-	ctx: WalkContext = {},
+	ctx: WalkContext,
 ): void {
 	const v4 = schema as ZodV4Internal;
 	const def = v4._zod?.def;
-	if (!def) return;
+	if (!def || !isObject(schema) || ctx.active.has(schema)) return;
+	ctx.active.add(schema);
 
-	const type = def.type as string | undefined;
-	if (!type) return;
-	if (walkZodV4Wrapper(def, type, prefix, fields, required, ctx)) return;
-	if (walkZodV4Structure(def, type, prefix, fields, required, ctx)) return;
-	if (walkZodV4SpecialLeaf(def, type, prefix, fields, required, ctx)) return;
-	if (!prefix) return;
-	pushZodV4Field(fields, prefix, mapZodV4Type(type), required, buildV4Metadata(def, ctx), ctx.defaultValue);
+	try {
+		const type = def.type as string | undefined;
+		if (!type) return;
+		if (walkZodV4Wrapper(schema, def, type, prefix, fields, required, ctx)) return;
+		if (walkZodV4Structure(schema, def, type, prefix, fields, required, ctx)) return;
+		if (walkZodV4SpecialLeaf(schema, def, type, prefix, fields, required, ctx)) return;
+		if (!prefix) return;
+		pushZodV4Field(fields, prefix, mapZodV4Type(type), required, buildV4Metadata(schema, def, ctx), ctx.defaultValue);
+	} finally {
+		ctx.active.delete(schema);
+	}
 }
 
 function walkZodV4Wrapper(
+	schema: unknown,
 	def: Readonly<Record<string, unknown>>,
 	type: string,
 	prefix: string,
@@ -66,35 +75,42 @@ function walkZodV4Wrapper(
 	ctx: WalkContext,
 ): boolean {
 	if (type === "optional") {
-		walkZodV4Inner(def, "innerType", prefix, fields, false, ctx);
+		const nextCtx = withWrapperMetadata(schema, def, ctx);
+		walkZodV4Inner(def, "innerType", prefix, fields, false, nextCtx);
 		return true;
 	}
 	if (type === "nullable") {
-		walkZodV4Inner(def, "innerType", prefix, fields, required, { ...ctx, nullable: true });
+		const nextCtx = withWrapperMetadata(schema, def, ctx);
+		walkZodV4Inner(def, "innerType", prefix, fields, required, { ...nextCtx, nullable: true });
 		return true;
 	}
 	if (type === "default") {
+		const nextCtx = withWrapperMetadata(schema, def, ctx);
 		const defaultValue = typeof def.defaultValue === "function" ? (def.defaultValue as () => unknown)() : undefined;
-		walkZodV4Inner(def, "innerType", prefix, fields, false, { ...ctx, defaultValue });
+		walkZodV4Inner(def, "innerType", prefix, fields, false, { ...nextCtx, defaultValue });
 		return true;
 	}
-	if (type === "effects" || type === "pipeline") {
-		walkZodV4Inner(def, type === "effects" ? "schema" : "in", prefix, fields, required, ctx);
+	if (type === "effects" || type === "pipeline" || type === "pipe") {
+		const nextCtx = withWrapperMetadata(schema, def, ctx);
+		walkZodV4Inner(def, type === "effects" ? "schema" : "in", prefix, fields, required, nextCtx);
 		return true;
 	}
 	if (type === "lazy") {
+		const nextCtx = withWrapperMetadata(schema, def, ctx);
 		const getter = def.getter as (() => unknown) | undefined;
-		if (getter) walkZodV4(getter(), prefix, fields, required, ctx);
+		if (getter) walkZodV4(getter(), prefix, fields, required, nextCtx);
 		return true;
 	}
 	if (type !== "branded" && type !== "readonly" && type !== "catch") return false;
+	const nextCtx = withWrapperMetadata(schema, def, ctx);
 	const key = type === "branded" ? "type" : "innerType";
-	const nextCtx = type === "readonly" ? { ...ctx, readOnly: true } : ctx;
-	walkZodV4Inner(def, key, prefix, fields, required, nextCtx);
+	const innerCtx = type === "readonly" ? { ...nextCtx, readOnly: true } : nextCtx;
+	walkZodV4Inner(def, key, prefix, fields, required, innerCtx);
 	return true;
 }
 
 function walkZodV4Structure(
+	schema: unknown,
 	def: Readonly<Record<string, unknown>>,
 	type: string,
 	prefix: string,
@@ -105,12 +121,12 @@ function walkZodV4Structure(
 	if (type === "object") {
 		const shape = def.shape as Record<string, unknown> | undefined;
 		for (const [key, value] of Object.entries(shape ?? {})) {
-			walkZodV4(value, prefix ? `${prefix}.${key}` : key, fields, true);
+			walkZodV4(value, prefix ? `${prefix}.${key}` : key, fields, true, { active: ctx.active });
 		}
 		return true;
 	}
 	if (type === "array") {
-		pushZodV4Field(fields, prefix, "array", required, buildV4Metadata(def, ctx));
+		pushZodV4Field(fields, prefix, "array", required, buildV4Metadata(schema, def, ctx), ctx.defaultValue);
 		return true;
 	}
 	if (type !== "intersection") return false;
@@ -122,6 +138,7 @@ function walkZodV4Structure(
 }
 
 function walkZodV4SpecialLeaf(
+	schema: unknown,
 	def: Readonly<Record<string, unknown>>,
 	type: string,
 	prefix: string,
@@ -142,11 +159,10 @@ function walkZodV4SpecialLeaf(
 		fieldType = typeof value === "number" ? "number" : typeof value === "boolean" ? "boolean" : "string";
 		extra = { const: value };
 	} else if (type === "nativeEnum") {
-		const values = def.values as Record<string, unknown> | undefined;
 		fieldType = "enum";
-		extra = { enum: values ? Object.values(values) : [] };
+		extra = { enum: enumValues(def.values) ?? [] };
 	} else return false;
-	pushZodV4Field(fields, prefix, fieldType, required, buildV4Metadata(def, ctx, extra));
+	pushZodV4Field(fields, prefix, fieldType, required, buildV4Metadata(schema, def, ctx, extra));
 	return true;
 }
 
@@ -174,7 +190,7 @@ function walkZodV4Inner(
 	prefix: string,
 	fields: SchemaFieldInfo[],
 	required: boolean,
-	ctx: WalkContext = {},
+	ctx: WalkContext,
 ): void {
 	const inner = def[key];
 	if (inner && typeof inner === "object") {
@@ -268,6 +284,7 @@ function applyV4Check(result: Record<string, unknown>, check: Record<string, unk
 
 /** Build metadata from v4 def, context, and extras */
 function buildV4Metadata(
+	schema: unknown,
 	def: Readonly<Record<string, unknown>>,
 	ctx: WalkContext,
 	extra?: Record<string, unknown>,
@@ -282,8 +299,8 @@ function buildV4Metadata(
 	Object.assign(result, extractV4Checks(def));
 
 	// Enum values
-	if (def.values && def.type === "enum") {
-		result.enum = def.values;
+	if (def.type === "enum") {
+		result.enum = enumValues(def.entries) ?? [];
 	}
 
 	// Context
@@ -293,20 +310,17 @@ function buildV4Metadata(
 	// Extra
 	if (extra) Object.assign(result, extra);
 
-	// Vendor extensions (from .meta({ vendor: {...} }))
-	const rawMeta = def.metadata as Record<string, unknown> | undefined;
-	if (rawMeta && typeof rawMeta === "object") {
-		const extensions: Record<string, Record<string, unknown>> = {};
-		for (const [key, value] of Object.entries(rawMeta)) {
-			if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-				extensions[key] = value as Record<string, unknown>;
-			}
-		}
-		if (Object.keys(extensions).length > 0) {
-			const existing = result.extensions as Record<string, Readonly<Record<string, unknown>>> | undefined;
-			result.extensions = { ...existing, ...extensions };
-		}
-	}
+	const inferred = Object.keys(result).length ? (result as SchemaFieldMetadata) : undefined;
+	const local = mergeZodMetadata(readZodMetadata(schema, def), inferred);
+	return mergeZodMetadata(local, ctx.metadata);
+}
 
-	return Object.keys(result).length > 0 ? (result as SchemaFieldMetadata) : undefined;
+function withWrapperMetadata(schema: unknown, def: ZodDef, ctx: WalkContext): WalkContext {
+	const metadata = readZodMetadata(schema, def);
+	const merged = mergeZodMetadata(metadata, ctx.metadata);
+	return merged ? { ...ctx, metadata: merged } : ctx;
+}
+
+function isObject(value: unknown): value is object {
+	return value !== null && typeof value === "object";
 }
