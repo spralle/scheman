@@ -22,7 +22,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24.20.0"
           registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
@@ -41,6 +41,37 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify Trusted Publishing runtime
+        if: steps.changesets.outputs.hasChangesets == 'false'
+        run: |
+          node --version
+          npm --version
+          node <<'NODE'
+          const { execFileSync } = require("node:child_process");
+          const parse = (version) => {
+            const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/);
+            if (!match) throw new Error(`Invalid SemVer: ${version}`);
+            return { numbers: match.slice(1, 4).map(Number), prerelease: match[4] };
+          };
+          const isAtLeast = (actual, minimum) => {
+            const current = parse(actual);
+            const required = parse(minimum);
+            for (let index = 0; index < 3; index += 1) {
+              if (current.numbers[index] !== required.numbers[index]) {
+                return current.numbers[index] > required.numbers[index];
+              }
+            }
+            return !current.prerelease || Boolean(required.prerelease);
+          };
+          const npmVersion = execFileSync("npm", ["--version"], { encoding: "utf8" }).trim();
+          if (!isAtLeast(process.version, "22.14.0")) throw new Error(`Node ${process.version} is unsupported`);
+          if (!isAtLeast(npmVersion, "11.5.1")) throw new Error(`npm ${npmVersion} is unsupported`);
+          NODE
+
+      - name: Validate npm package
+        if: steps.changesets.outputs.hasChangesets == 'false'
+        run: npm publish --dry-run --access public --workspace=@scheman/core
+
       - name: Publish to npm via Trusted Publishing
         if: steps.changesets.outputs.hasChangesets == 'false'
-        run: npm publish --access public --workspaces --if-present
+        run: npm publish --access public --workspace=@scheman/core
