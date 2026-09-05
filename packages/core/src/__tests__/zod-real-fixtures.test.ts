@@ -57,17 +57,86 @@ describe("real Zod v3 fixtures", () => {
 		});
 	});
 
-	it("merges pipeline output, input, pipeline, and outer metadata in field-input precedence order", () => {
-		const output = withV3Metadata(z3.string(), { shared: { output: true, winner: "output" } });
-		const input = withV3Metadata(z3.string(), { shared: { input: true, winner: "input" } });
-		const pipeline = withV3Metadata(input.pipe(output), { shared: { pipeline: true, winner: "pipeline" } });
-		const field = withV3Metadata(pipeline.optional(), { shared: { outer: true, winner: "outer" } });
+	it("merges lazy pipeline output, input, pipeline, and outer metadata in field-input precedence order", () => {
+		const outputLeaf = withV3Metadata(z3.string(), {
+			shared: {
+				outputLeaf: true,
+				lazyWinner: "output-leaf",
+				inputWinner: "output-leaf",
+				pipelineWinner: "output-leaf",
+				outerWinner: "output-leaf",
+			},
+		});
+		const output = withV3Metadata(
+			z3.lazy(() => outputLeaf),
+			{
+				shared: {
+					outputLazy: true,
+					lazyWinner: "output-lazy",
+					inputWinner: "output-lazy",
+					pipelineWinner: "output-lazy",
+					outerWinner: "output-lazy",
+				},
+			},
+		);
+		const input = withV3Metadata(z3.string(), {
+			shared: { input: true, inputWinner: "input", pipelineWinner: "input", outerWinner: "input" },
+		});
+		const pipeline = withV3Metadata(input.pipe(output), {
+			shared: { pipeline: true, pipelineWinner: "pipeline", outerWinner: "pipeline" },
+		});
+		const field = withV3Metadata(pipeline.optional(), { shared: { outer: true, outerWinner: "outer" } });
 		const result = extractFromZod(z3.object({ value: field }));
 
 		expect(result.fields[0]).toMatchObject({ path: "value", type: "string", required: false });
 		expect(result.fields[0]?.metadata?.extensions).toEqual({
-			shared: { output: true, input: true, pipeline: true, outer: true, winner: "outer" },
+			shared: {
+				outputLeaf: true,
+				outputLazy: true,
+				input: true,
+				pipeline: true,
+				outer: true,
+				lazyWinner: "output-lazy",
+				inputWinner: "input",
+				pipelineWinner: "pipeline",
+				outerWinner: "outer",
+			},
 		});
+	});
+
+	it("terminates when a pipeline output lazy resolves back to the pipeline", () => {
+		const input = withV3Metadata(z3.string(), { input: { retained: true } });
+		const cycle: { pipeline?: z3.ZodTypeAny } = {};
+		const output = withV3Metadata(
+			z3.lazy(() => cycle.pipeline as z3.ZodTypeAny),
+			{ lazy: { retained: true } },
+		);
+		const pipeline = withV3Metadata(input.pipe(output), { pipeline: { retained: true } });
+		cycle.pipeline = pipeline;
+		const result = extractFromZod(z3.object({ value: pipeline }));
+
+		expect(result.fields).toHaveLength(1);
+		expect(result.fields[0]).toMatchObject({ path: "value", type: "string" });
+		expect(result.fields[0]?.metadata?.extensions).toMatchObject({
+			input: { retained: true },
+			lazy: { retained: true },
+			pipeline: { retained: true },
+		});
+	});
+
+	it("preserves defaults on every special leaf", () => {
+		const Native = { One: "one", Two: "two" } as const;
+		const result = extractFromZod(
+			z3.object({
+				literal: z3.literal("fixed").default("fixed"),
+				nativeEnum: z3.nativeEnum(Native).default(Native.One),
+				record: z3.record(z3.string()).default({ saved: "yes" }),
+				tuple: z3.tuple([z3.string()]).default(["saved"]),
+				bigint: z3.bigint().default(7n),
+			}),
+		);
+
+		expect(result.fields.map((field) => field.defaultValue)).toEqual(["fixed", "one", { saved: "yes" }, ["saved"], 7n]);
 	});
 
 	it("extracts a reused schema at each path and terminates lazy cycles", () => {
@@ -168,20 +237,105 @@ describe("real Zod v4 fixtures", () => {
 		});
 	});
 
-	it("merges pipe output, input, pipe, and outer metadata in field-input precedence order", () => {
-		const output = z4.string().meta({ shared: { output: true, winner: "output" } });
-		const input = z4.string().meta({ shared: { input: true, winner: "input" } });
+	it("merges lazy pipe output, input, pipe, and outer metadata in field-input precedence order", () => {
+		const outputLeaf = z4.string().meta({
+			shared: {
+				outputLeaf: true,
+				lazyWinner: "output-leaf",
+				inputWinner: "output-leaf",
+				pipelineWinner: "output-leaf",
+				outerWinner: "output-leaf",
+			},
+		});
+		const output = z4
+			.lazy(() => outputLeaf)
+			.meta({
+				shared: {
+					outputLazy: true,
+					lazyWinner: "output-lazy",
+					inputWinner: "output-lazy",
+					pipelineWinner: "output-lazy",
+					outerWinner: "output-lazy",
+				},
+			});
+		const input = z4.string().meta({
+			shared: { input: true, inputWinner: "input", pipelineWinner: "input", outerWinner: "input" },
+		});
 		const field = input
 			.pipe(output)
-			.meta({ shared: { pipeline: true, winner: "pipeline" } })
+			.meta({ shared: { pipeline: true, pipelineWinner: "pipeline", outerWinner: "pipeline" } })
 			.optional()
-			.meta({ shared: { outer: true, winner: "outer" } });
+			.meta({ shared: { outer: true, outerWinner: "outer" } });
 		const result = extractFromZodV4(z4.object({ value: field }));
 
 		expect(result.fields[0]).toMatchObject({ path: "value", type: "string", required: false });
 		expect(result.fields[0]?.metadata?.extensions).toEqual({
-			shared: { output: true, input: true, pipeline: true, outer: true, winner: "outer" },
+			shared: {
+				outputLeaf: true,
+				outputLazy: true,
+				input: true,
+				pipeline: true,
+				outer: true,
+				lazyWinner: "output-lazy",
+				inputWinner: "input",
+				pipelineWinner: "pipeline",
+				outerWinner: "outer",
+			},
 		});
+	});
+
+	it("terminates when a pipe output lazy resolves back to the pipe", () => {
+		const input = z4.string().meta({ input: { retained: true } });
+		const cycle: { pipeline?: z4.ZodType } = {};
+		const output = z4.lazy(() => cycle.pipeline as z4.ZodType).meta({ lazy: { retained: true } });
+		const pipeline = input.pipe(output).meta({ pipeline: { retained: true } });
+		cycle.pipeline = pipeline;
+		const result = extractFromZodV4(z4.object({ value: pipeline }));
+
+		expect(result.fields).toHaveLength(1);
+		expect(result.fields[0]).toMatchObject({ path: "value", type: "string" });
+		expect(result.fields[0]?.metadata?.extensions).toMatchObject({
+			input: { retained: true },
+			lazy: { retained: true },
+			pipeline: { retained: true },
+		});
+	});
+
+	it("resolves scalar and callable defaults once and preserves function values", () => {
+		let stringFactoryCalls = 0;
+		let functionFactoryCalls = 0;
+		const functionDefault = () => "saved";
+		const result = extractFromZodV4(
+			z4.object({
+				scalar: z4.string().default("fixed"),
+				callable: z4.string().default(() => {
+					stringFactoryCalls += 1;
+					return "generated";
+				}),
+				functionValue: z4.function().default(() => {
+					functionFactoryCalls += 1;
+					return functionDefault;
+				}),
+			}),
+		);
+
+		expect(result.fields.map((field) => field.defaultValue)).toEqual(["fixed", "generated", functionDefault]);
+		expect(stringFactoryCalls).toBe(1);
+		expect(functionFactoryCalls).toBe(1);
+	});
+
+	it("preserves defaults on every special leaf", () => {
+		const Native = { One: "one", Two: "two" } as const;
+		const result = extractFromZodV4(
+			z4.object({
+				literal: z4.literal("fixed").default("fixed"),
+				nativeEnum: z4.nativeEnum(Native).default(Native.One),
+				record: z4.record(z4.string(), z4.string()).default({ saved: "yes" }),
+				tuple: z4.tuple([z4.string()]).default(["saved"]),
+			}),
+		);
+
+		expect(result.fields.map((field) => field.defaultValue)).toEqual(["fixed", "one", { saved: "yes" }, ["saved"]]);
 	});
 
 	it("extracts reused schemas independently and terminates recursive graphs", () => {
