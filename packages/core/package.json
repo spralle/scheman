@@ -1,6 +1,6 @@
 {
 	"name": "@scheman/core",
-	"version": "0.1.0",
+	"version": "1.0.0",
 	"type": "module",
 	"description": "Universal schema ingestion and metadata extraction for JSON Schema, Zod v3, and Zod v4",
 	"keywords": ["schema", "json-schema", "zod", "metadata", "extraction", "standard-schema", "ingestion"],
@@ -32,6 +32,8 @@
 		"zod": ">=3.24.0 <4 || >=4.0.0 <5"
 	},
 	"peerDependenciesMeta": {
-		"zod": { "optional": true }
+		"zod": {
+			"optional": true
+		}
 	}
 }
