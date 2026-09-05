@@ -17,6 +17,14 @@ function zodV3Optional(inner: unknown) {
 	return zodV3("ZodOptional", { innerType: inner });
 }
 
+function zodV4(type: string, extra: Record<string, unknown> = {}) {
+	return { _zod: { def: { type, ...extra } } };
+}
+
+function zodV4Object(shape: Record<string, unknown>) {
+	return zodV4("object", { shape });
+}
+
 describe("extractFromZod", () => {
 	describe("basic leaf types", () => {
 		it("maps ZodString to string", () => {
@@ -276,5 +284,55 @@ describe("extractFromZodV4", () => {
 
 		expect(extractFromZodV4({ _zod: { def } })).toEqual({ fields: [], metadata: { vendor: "zod4" } });
 		expect(metadataReads).toBe(0);
+	});
+
+	it("preserves a function returned by a default accessor without invoking it", () => {
+		let accessorReads = 0;
+		let functionCalls = 0;
+		const defaultFunction = () => {
+			functionCalls += 1;
+		};
+		const defaultDef = {
+			type: "default",
+			innerType: zodV4("literal", { value: "function" }),
+			get defaultValue() {
+				accessorReads += 1;
+				return defaultFunction;
+			},
+		};
+		const result = extractFromZodV4(zodV4Object({ value: { _zod: { def: defaultDef } } }));
+
+		expect(result.fields[0]?.defaultValue).toBe(defaultFunction);
+		expect(accessorReads).toBe(1);
+		expect(functionCalls).toBe(0);
+	});
+
+	it("supports callable data defaults and the nativeEnum values compatibility branch", () => {
+		let defaultCalls = 0;
+		const nativeEnum = zodV4("nativeEnum", { values: { One: "one", Two: "two" } });
+		const field = zodV4("default", {
+			innerType: nativeEnum,
+			defaultValue: () => {
+				defaultCalls += 1;
+				return "one";
+			},
+		});
+		const result = extractFromZodV4(zodV4Object({ value: field }));
+
+		expect(result.fields[0]).toMatchObject({
+			path: "value",
+			type: "enum",
+			required: false,
+			defaultValue: "one",
+			metadata: { enum: ["one", "two"] },
+		});
+		expect(defaultCalls).toBe(1);
+	});
+
+	it("omits explicit undefined defaults", () => {
+		const field = zodV4("default", { innerType: zodV4("literal", { value: "fixed" }), defaultValue: undefined });
+		const result = extractFromZodV4(zodV4Object({ value: field }));
+
+		expect(result.fields[0]).not.toHaveProperty("defaultValue");
 	});
 });

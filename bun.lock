@@ -11,14 +11,16 @@
         "typescript": "^5.7.0",
         "vitest": "^3.1.0",
         "zod3": "npm:zod@3.25.76",
+        "zod3-min": "npm:zod@3.24.0",
         "zod4": "npm:zod@4.1.5",
+        "zod4-min": "npm:zod@4.0.0",
       },
     },
     "packages/core": {
       "name": "@scheman/core",
       "version": "0.1.0",
       "peerDependencies": {
-        "zod": ">=3.0.0 || >=4.0.0",
+        "zod": ">=3.24.0 <4 || >=4.0.0 <5",
       },
       "optionalPeers": [
         "zod",
@@ -498,7 +500,11 @@
 
     "zod3": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
+    "zod3-min": ["zod@3.24.0", "", {}, "sha512-Hz+wiY8yD0VLA2k/+nsg2Abez674dDGTai33SwNvMPuf9uIrBC9eFgIMQxBBbHFxVXi8W+5nX9DcAh9YNSQm/w=="],
+
     "zod4": ["zod@4.1.5", "", {}, "sha512-rcUUZqlLJgBC33IT3PNMgsCq6TzLQEG/Ei/KTCU0PedSWRMAXoOUN+4t/0H+Q8bdnLPdqUYnvboJT0bn/229qg=="],
+
+    "zod4-min": ["zod@4.0.0", "", {}, "sha512-9diLdTPc/L7w/5jI4C3gHYNiGHDV9IZYxo1e5LSD8cabi65WVTWWb+g2BGPEpUUCOxR4D+6O5B0AzyMdUAXwrw=="],
 
     "@manypkg/find-root/fs-extra": ["fs-extra@8.1.0", "", { "dependencies": { "graceful-fs": "^4.2.0", "jsonfile": "^4.0.0", "universalify": "^0.1.0" } }, "sha512-yhlQgA6mnOJUKOsRUFsgJdQCvkKhcz8tlZG5HBQfReYZy46OwLcY+Zia0mtdHsOo9y/hP+CxMN0TU9QxoOtG4g=="],
 

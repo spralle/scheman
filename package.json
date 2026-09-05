@@ -16,7 +16,9 @@
 		"typescript": "^5.7.0",
 		"vitest": "^3.1.0",
 		"zod3": "npm:zod@3.25.76",
-		"zod4": "npm:zod@4.1.5"
+		"zod3-min": "npm:zod@3.24.0",
+		"zod4": "npm:zod@4.1.5",
+		"zod4-min": "npm:zod@4.0.0"
 	},
 	"packageManager": "bun@1.2.0"
 }
