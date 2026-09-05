@@ -6,7 +6,12 @@ import type {
 	SchemaIngestionResult,
 	SchemaMetadata,
 } from "../types.js";
-import { mergeZodMetadata as mergeMetadataLayers, readZodMetadata, zodV3EnumValues } from "./zod-metadata.js";
+import {
+	collectZodV3Metadata,
+	mergeZodMetadata as mergeMetadataLayers,
+	readZodMetadata,
+	zodV3EnumValues,
+} from "./zod-metadata.js";
 
 // Zod internal types for duck-typed traversal (Zod has no formal traversal API)
 interface ZodTypeDef {
@@ -109,7 +114,6 @@ function walkZodTransparentWrapper(
 ): boolean {
 	const innerKeys: Readonly<Record<string, string>> = {
 		ZodEffects: "schema",
-		ZodPipeline: "in",
 		ZodBranded: "type",
 		ZodCatch: "innerType",
 		ZodReadonly: "innerType",
@@ -121,7 +125,7 @@ function walkZodTransparentWrapper(
 	}
 	if (typeName === "ZodPipeline") {
 		// Fields describe accepted input, so input metadata overrides output metadata; wrappers remain highest.
-		const outputMetadata = collectZodMetadata(def.out, new WeakSet());
+		const outputMetadata = collectZodV3Metadata(def.out);
 		const lowerMetadata = mergeMetadataLayers(ctx.lowerMetadata, outputMetadata);
 		const wrapperCtx = withWrapperMetadata(schema, withLowerMetadata(ctx, lowerMetadata));
 		const input = def.in as ZodLike | undefined;
@@ -193,7 +197,7 @@ function walkZodSpecialLeaf(
 	} else if (typeName === "ZodBigInt") {
 		type = "integer";
 	} else return false;
-	pushZodField(fields, prefix, type, required, buildZodMetadata(schema, ctx, extra));
+	pushZodField(fields, prefix, type, required, buildZodMetadata(schema, ctx, extra), ctx.defaultValue);
 	return true;
 }
 
@@ -335,36 +339,4 @@ function withWrapperMetadata(schema: ZodLike, ctx: WalkContext): WalkContext {
 
 function withLowerMetadata(ctx: WalkContext, metadata?: SchemaFieldMetadata): WalkContext {
 	return metadata ? { ...ctx, lowerMetadata: metadata } : ctx;
-}
-
-function collectZodMetadata(schema: unknown, active: WeakSet<object>): SchemaFieldMetadata | undefined {
-	if (!isObject(schema) || active.has(schema)) return undefined;
-	active.add(schema);
-	try {
-		const def = (schema as ZodLike)._def;
-		if (!def) return undefined;
-
-		const typeName = def.typeName ?? "";
-		if (typeName === "ZodPipeline") {
-			const output = collectZodMetadata(def.out, active);
-			const input = collectZodMetadata(def.in, active);
-			return mergeMetadataLayers(mergeMetadataLayers(output, input), readZodMetadata(schema, def));
-		}
-		const key = metadataInnerKey(typeName);
-		const inner = key ? collectZodMetadata(def[key], active) : undefined;
-		return mergeMetadataLayers(inner, readZodMetadata(schema, def));
-	} finally {
-		active.delete(schema);
-	}
-}
-
-function metadataInnerKey(typeName: string): string | undefined {
-	if (["ZodOptional", "ZodNullable", "ZodDefault", "ZodCatch", "ZodReadonly"].includes(typeName)) return "innerType";
-	if (typeName === "ZodEffects") return "schema";
-	if (typeName === "ZodBranded") return "type";
-	return undefined;
-}
-
-function isObject(value: unknown): value is object {
-	return value !== null && typeof value === "object";
 }

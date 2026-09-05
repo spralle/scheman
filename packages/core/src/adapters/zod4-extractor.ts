@@ -5,7 +5,13 @@ import type {
 	SchemaIngestionResult,
 	SchemaMetadata,
 } from "../types.js";
-import { type ZodDef, mergeZodMetadata, readZodMetadata, zodV4EnumValues } from "./zod-metadata.js";
+import {
+	type ZodDef,
+	collectZodV4Metadata,
+	mergeZodMetadata,
+	readZodMetadata,
+	zodV4EnumValues,
+} from "./zod-metadata.js";
 
 /**
  * Zod v4 introspection interfaces. v4 replaces `_def` with a `_zod` property
@@ -87,13 +93,13 @@ function walkZodV4Wrapper(
 	}
 	if (type === "default") {
 		const nextCtx = withWrapperMetadata(schema, def, ctx);
-		const defaultValue = typeof def.defaultValue === "function" ? (def.defaultValue as () => unknown)() : undefined;
+		const defaultValue = resolveV4Default(def);
 		walkZodV4Inner(def, "innerType", prefix, fields, false, { ...nextCtx, defaultValue });
 		return true;
 	}
 	if (type === "effects" || type === "pipeline" || type === "pipe") {
 		// Fields describe accepted input, so input metadata overrides output metadata; wrappers remain highest.
-		const outputMetadata = collectV4Metadata(def.out, new WeakSet());
+		const outputMetadata = collectZodV4Metadata(def.out);
 		const lowerMetadata = mergeZodMetadata(ctx.lowerMetadata, outputMetadata);
 		const nextCtx = withWrapperMetadata(schema, def, withLowerMetadata(ctx, lowerMetadata));
 		walkZodV4Inner(def, type === "effects" ? "schema" : "in", prefix, fields, required, nextCtx);
@@ -166,7 +172,7 @@ function walkZodV4SpecialLeaf(
 		fieldType = "enum";
 		extra = { enum: zodV4EnumValues(def.entries ?? def.values) ?? [] };
 	} else return false;
-	pushZodV4Field(fields, prefix, fieldType, required, buildV4Metadata(schema, def, ctx, extra));
+	pushZodV4Field(fields, prefix, fieldType, required, buildV4Metadata(schema, def, ctx, extra), ctx.defaultValue);
 	return true;
 }
 
@@ -200,6 +206,13 @@ function walkZodV4Inner(
 	if (inner && typeof inner === "object") {
 		walkZodV4(inner, prefix, fields, required, ctx);
 	}
+}
+
+function resolveV4Default(def: Readonly<Record<string, unknown>>): unknown {
+	const descriptor = Object.getOwnPropertyDescriptor(def, "defaultValue");
+	if (descriptor?.get) return descriptor.get.call(def);
+	const stored = descriptor ? descriptor.value : def.defaultValue;
+	return typeof stored === "function" ? stored() : stored;
 }
 
 function mapZodV4Type(type: string): SchemaFieldType {
@@ -332,32 +345,4 @@ function withLowerMetadata(ctx: WalkContext, metadata?: SchemaFieldMetadata): Wa
 
 function isObject(value: unknown): value is object {
 	return value !== null && typeof value === "object";
-}
-
-function collectV4Metadata(schema: unknown, active: WeakSet<object>): SchemaFieldMetadata | undefined {
-	if (!isObject(schema) || active.has(schema)) return undefined;
-	active.add(schema);
-	try {
-		const def = (schema as ZodV4Internal)._zod?.def;
-		if (!def) return undefined;
-
-		const type = def.type as string | undefined;
-		if (type === "pipe" || type === "pipeline") {
-			const output = collectV4Metadata(def.out, active);
-			const input = collectV4Metadata(def.in, active);
-			return mergeZodMetadata(mergeZodMetadata(output, input), readZodMetadata(schema, def));
-		}
-		const key = type ? metadataInnerKey(type) : undefined;
-		const inner = key ? collectV4Metadata(def[key], active) : undefined;
-		return mergeZodMetadata(inner, readZodMetadata(schema, def));
-	} finally {
-		active.delete(schema);
-	}
-}
-
-function metadataInnerKey(type: string): string | undefined {
-	if (["optional", "nullable", "default", "catch", "readonly"].includes(type)) return "innerType";
-	if (type === "effects") return "schema";
-	if (type === "branded") return "type";
-	return undefined;
 }

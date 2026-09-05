@@ -6,7 +6,7 @@ Universal schema ingestion and metadata extraction.
 
 ## What is Scheman?
 
-Scheman is a universal schema ingestion library that normalizes JSON Schema, Zod v3, and Zod v4 into a common `SchemaIngestionResult` structure. It provides a pluggable extractor registry so you can add support for any StandardSchema-compatible validator.
+Scheman is a universal schema ingestion library that normalizes JSON Schema and supported Zod schemas into a common `SchemaIngestionResult` structure. The main `ingestSchema` contract supports Zod `>=3.24.0 <4` and `>=4.0.0 <5`. It also provides a pluggable extractor registry so you can add support for any StandardSchema-compatible validator.
 
 ## Installation
 
@@ -18,7 +18,7 @@ pnpm add @scheman/core
 bun add @scheman/core
 ```
 
-> **Note:** `zod` is an optional peer dependency — only needed if ingesting Zod schemas.
+> **Note:** `zod` is an optional peer dependency, needed only for Zod ingestion. Supported versions are Zod `>=3.24.0 <4` and `>=4.0.0 <5`.
 
 ## Quick Start
 

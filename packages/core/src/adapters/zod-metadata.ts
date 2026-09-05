@@ -3,6 +3,46 @@ import type { SchemaFieldMetadata } from "../types.js";
 
 export type ZodDef = Readonly<Record<string, unknown>>;
 
+interface MetadataGraphConfig {
+	readonly getDef: (schema: unknown) => ZodDef | undefined;
+	readonly getType: (def: ZodDef) => string | undefined;
+	readonly innerKeys: Readonly<Record<string, string>>;
+	readonly lazyType: string;
+	readonly pipelineTypes: ReadonlySet<string>;
+}
+
+const V3_METADATA_GRAPH: MetadataGraphConfig = {
+	getDef: (schema) => (schema as { readonly _def?: ZodDef })._def,
+	getType: (def) => def.typeName as string | undefined,
+	innerKeys: {
+		ZodOptional: "innerType",
+		ZodNullable: "innerType",
+		ZodDefault: "innerType",
+		ZodCatch: "innerType",
+		ZodReadonly: "innerType",
+		ZodEffects: "schema",
+		ZodBranded: "type",
+	},
+	lazyType: "ZodLazy",
+	pipelineTypes: new Set(["ZodPipeline"]),
+};
+
+const V4_METADATA_GRAPH: MetadataGraphConfig = {
+	getDef: (schema) => (schema as { readonly _zod?: { readonly def?: ZodDef } })._zod?.def,
+	getType: (def) => def.type as string | undefined,
+	innerKeys: {
+		optional: "innerType",
+		nullable: "innerType",
+		default: "innerType",
+		catch: "innerType",
+		readonly: "innerType",
+		effects: "schema",
+		branded: "type",
+	},
+	lazyType: "lazy",
+	pipelineTypes: new Set(["pipe", "pipeline"]),
+};
+
 interface MetadataCarrier {
 	readonly meta?: () => unknown;
 }
@@ -35,6 +75,53 @@ export function mergeZodMetadata(
 	}) as SchemaFieldMetadata;
 }
 
+export function collectZodV3Metadata(schema: unknown): SchemaFieldMetadata | undefined {
+	return collectZodMetadata(schema, V3_METADATA_GRAPH, new WeakSet());
+}
+
+export function collectZodV4Metadata(schema: unknown): SchemaFieldMetadata | undefined {
+	return collectZodMetadata(schema, V4_METADATA_GRAPH, new WeakSet());
+}
+
+function collectZodMetadata(
+	schema: unknown,
+	config: MetadataGraphConfig,
+	active: WeakSet<object>,
+): SchemaFieldMetadata | undefined {
+	if (!isObject(schema) || active.has(schema)) return undefined;
+	active.add(schema);
+	try {
+		const def = config.getDef(schema);
+		if (!def) return undefined;
+		const type = config.getType(def);
+		const local = readZodMetadata(schema, def);
+		if (type && config.pipelineTypes.has(type)) {
+			const output = collectZodMetadata(def.out, config, active);
+			const input = collectZodMetadata(def.in, config, active);
+			return mergeZodMetadata(mergeZodMetadata(output, input), local);
+		}
+		const inner = collectMetadataInner(def, type, config, active);
+		return mergeZodMetadata(inner, local);
+	} finally {
+		active.delete(schema);
+	}
+}
+
+function collectMetadataInner(
+	def: ZodDef,
+	type: string | undefined,
+	config: MetadataGraphConfig,
+	active: WeakSet<object>,
+): SchemaFieldMetadata | undefined {
+	if (!type) return undefined;
+	if (type === config.lazyType) {
+		const getter = def.getter;
+		return typeof getter === "function" ? collectZodMetadata(getter(), config, active) : undefined;
+	}
+	const innerKey = config.innerKeys[type];
+	return innerKey ? collectZodMetadata(def[innerKey], config, active) : undefined;
+}
+
 export function zodV3EnumValues(entries: unknown): readonly unknown[] | undefined {
 	if (Array.isArray(entries)) return entries.filter(isPrimitive);
 	if (!isRecord(entries)) return undefined;
@@ -60,6 +147,10 @@ function isPrimitive(value: unknown): value is string | number {
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isObject(value: unknown): value is object {
+	return value !== null && typeof value === "object";
 }
 
 function objectValuedEntries(
