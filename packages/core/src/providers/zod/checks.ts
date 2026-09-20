@@ -1,4 +1,4 @@
-import { data, entries } from "../../document/reader.js";
+import { data } from "../../document/reader.js";
 import type { OwnedValue } from "../../document/types.js";
 import { checkValue } from "./check-values.js";
 import { evidence, observed } from "./evidence.js";
@@ -99,10 +99,10 @@ function checkEvidence(definition: unknown, state: Walk): unknown {
 		result.opaque = true;
 		result.unsupported = state.context.copy(definition, state.side, state.path);
 	}
-	for (const [key] of entries(definition)) {
-		if (!state.take()) break;
-		if (!fields.has(key)) continue;
+	for (const key of fields) {
 		const item = evidence(definition, key);
+		if (item.status === "absent") continue;
+		if (!state.take()) break;
 		if (item.status !== "value") {
 			state.partial("zod.checks-unreadable");
 			result.opaque = true;

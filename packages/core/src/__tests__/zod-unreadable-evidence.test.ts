@@ -48,6 +48,7 @@ describe.each(matrix)("#33 R4 Zod $name", ({ z, provider, version }) => {
 		"checks",
 		"check-index",
 		"check-value",
+		"check-value-hidden",
 		"minLength",
 		"description",
 		"metadata",
@@ -62,7 +63,7 @@ describe.each(matrix)("#33 R4 Zod $name", ({ z, provider, version }) => {
 			target = source._def.checks;
 			key = "0";
 		}
-		if (location === "check-value") {
+		if (location === "check-value" || location === "check-value-hidden") {
 			const check = source._def.checks[0];
 			target = version === 3 ? check : (check as unknown as { _zod: { def: object } })._zod.def;
 			key = version === 3 ? "value" : "minimum";
@@ -77,7 +78,7 @@ describe.each(matrix)("#33 R4 Zod $name", ({ z, provider, version }) => {
 				throw new Error("forbidden");
 			},
 			configurable: true,
-			enumerable: true,
+			enumerable: location !== "check-value-hidden",
 		});
 		const { document } = ingestSchemaDocument(source, { provider: provider({ execution }) });
 		for (const side of ["input", "output"] as const) {
