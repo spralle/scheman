@@ -1,5 +1,6 @@
 import type { PropertyEdge } from "../../document/nodes.js";
 import { data, isReference } from "../../document/reader.js";
+import { evidence, literalValues } from "./evidence.js";
 import type { Walk } from "./types.js";
 
 type Presence = PropertyEdge["presence"];
@@ -10,7 +11,12 @@ function inspect(source: unknown, state: Walk, seen: Set<unknown>): Presence {
 	if (!state.take()) return "unknown";
 	if (!isReference(source) || seen.has(source) || seen.size >= state.context.limits.maxDepth) return "unknown";
 	const definition = state.reader.definition(source);
-	if (definition === undefined || data(definition, "coerce") === true) return "unknown";
+	if (
+		definition === undefined ||
+		evidence(definition, "coerce").status === "unavailable" ||
+		data(definition, "coerce") === true
+	)
+		return "unknown";
 	const kind = state.reader.kind(definition);
 	const next = new Set(seen).add(source);
 	if (["nullable", "readonly", "branded"].includes(kind))
@@ -20,6 +26,14 @@ function inspect(source: unknown, state: Walk, seen: Set<unknown>): Presence {
 	if (kind === "pipe" || kind === "pipeline")
 		return inspect(data(definition, state.side === "input" ? "in" : "out"), state, next);
 	if (kind === "effects") return effectPresence(definition, state, next);
+	if (kind === "literal") {
+		const values = literalValues(definition, state);
+		return values?.length ? (values.includes(undefined) ? "optional" : "required") : "unknown";
+	}
+	if (kind === "optional" && state.side === "output" && state.reader.version === 4) {
+		// V4 may apply defaults inside optional wrappers instead of omitting the property.
+		return inspect(data(definition, "innerType"), state, next) === "unknown" ? "unknown" : "optional";
+	}
 	if (kind === "union" || kind === "discriminatedunion") return unionPresence(data(definition, "options"), state, next);
 	if (kind === "intersection") return intersectionPresence(definition, state, next);
 	return directPresence(kind, state);

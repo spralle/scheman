@@ -1,6 +1,7 @@
 import type { PropertyEdge, SchemaNode } from "../../document/nodes.js";
 import { data, entries, isReference } from "../../document/reader.js";
 import type { NodeRef } from "../../document/types.js";
+import { evidence, observed } from "./evidence.js";
 import { presence } from "./presence.js";
 import type { NodeBuilder, Walk } from "./types.js";
 
@@ -43,7 +44,12 @@ function unknownKeys(
 	state: Walk,
 ): Pick<Extract<SchemaNode, { kind: "object" }>, "unknownKeys" | "additionalProperties"> {
 	if (!state.context.available()) return { unknownKeys: "unknown" };
-	const catchall = data(definition, "catchall");
+	const item = evidence(definition, "catchall");
+	if (item.status === "unavailable") {
+		state.partial("zod.catchall-unreadable");
+		return { unknownKeys: "unknown" };
+	}
+	const catchall = item.status === "value" ? item.value : undefined;
 	const kind = state.reader.kind(state.reader.definition(catchall));
 	if (catchall && kind !== "never") {
 		return {
@@ -52,7 +58,7 @@ function unknownKeys(
 		};
 	}
 	if (state.reader.version === 4) return { unknownKeys: kind === "never" ? "reject" : "strip" };
-	const policy = data(definition, "unknownKeys");
+	const policy = observed(definition, "unknownKeys", state, "zod.unknown-keys-unreadable");
 	return {
 		unknownKeys:
 			policy === "strict"
@@ -74,11 +80,15 @@ function children(raw: unknown, state: Walk): NodeRef[] {
 	return result;
 }
 function tuple(definition: unknown, state: Walk): SchemaNode {
-	const rest = data(definition, "rest");
+	const item = evidence(definition, "rest");
+	const rest = item.status === "value" ? item.value : undefined;
+	const items = children(data(definition, "items"), state);
+	const restNode =
+		item.status === "unavailable" ? state.unknown("zod.rest-unreadable") : rest ? state.child(rest, "rest") : undefined;
 	return {
 		kind: "tuple",
-		items: children(data(definition, "items"), state),
-		...(rest ? { rest: state.child(rest, "rest") } : {}),
+		items,
+		...(restNode ? { rest: restNode } : {}),
 	};
 }
 function record(definition: unknown, state: Walk): SchemaNode {
@@ -93,7 +103,7 @@ function record(definition: unknown, state: Walk): SchemaNode {
 	};
 }
 function union(definition: unknown, state: Walk): SchemaNode {
-	const discriminator = data(definition, "discriminator");
+	const discriminator = observed(definition, "discriminator", state, "zod.discriminator-unreadable");
 	return {
 		kind: "union",
 		semantics: "zod",

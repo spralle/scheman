@@ -10,4 +10,6 @@ Select JSON Schema, Zod 3/4, validation-only Standard Schema, or explicit Standa
 
 JSON Schema supports draft-07 and 2020-12 with local pointer/anchor references; external references, resource rebasing and dynamic evaluation remain explicit unsupported evidence. Bounded graph construction and owned metadata do not provide a hostile-code sandbox. Zod is optional and never imported by the library; tested versions are 3.24.0, 3.25.76, 4.0.0 and 4.1.5.
 
+Property presence preserves passive undefined literals, including unions and nullable wrappers; deferred Zod 4 defaults inside optional wrappers keep unknown output presence. Native enum values follow version-specific reverse-mapping rules. Unreadable literal, constraint, and metadata evidence is diagnosed rather than presented as known undefined or complete structure. Anchor discovery ignores out-of-dialect annotation payloads.
+
 Retained merge/equality/error utilities keep their caller-trusted semantics. JSON middleware now accepts boolean schemas, so object-only middleware must narrow first. Official Standard types are re-exported from `@standard-schema/spec`. See the packaged `MIGRATION.md` for removed names, complete migration examples, limits, and fidelity boundaries.

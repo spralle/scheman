@@ -79,7 +79,7 @@ export class ReferenceIndex {
 			definition: this.definition.bind(this),
 			read: this.read.bind(this),
 		};
-		for (const child of children(current, scanContext)) this.scan(child, depth + 1);
+		for (const child of children(current, scanContext, this.dialect)) this.scan(child, depth + 1);
 	}
 
 	private indexAnchor(location: Location): void {

@@ -171,8 +171,9 @@ it("indexes unreachable definitions and preserves separate definition locations 
 
 it.each(["draft-07", "draft-2020-12"] as const)("resolves local anchors and anchor recursion in %s", (dialect) => {
 	const anchor = dialect === "draft-07" ? { $id: "#tree" } : { $anchor: "tree" };
+	const definitions = dialect === "draft-07" ? "definitions" : "$defs";
 	const document = ingest(
-		{ $ref: "#tree", $defs: { tree: { ...anchor, type: "array", items: { $ref: "#tree" } } } },
+		{ $ref: "#tree", [definitions]: { tree: { ...anchor, type: "array", items: { $ref: "#tree" } } } },
 		undefined,
 		dialect,
 	);

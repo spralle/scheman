@@ -1,8 +1,9 @@
 import type { SchemaNode } from "../../document/nodes.js";
-import { data, pointer } from "../../document/reader.js";
+import { pointer } from "../../document/reader.js";
 import type { Side } from "../../document/types.js";
 import type { DocumentContext, SchemaDocumentProvider } from "../types.js";
 import { checks } from "./checks.js";
+import { observed } from "./evidence.js";
 import { executionCache, executionPolicy } from "./execution.js";
 import { metadata } from "./metadata.js";
 import { scalar } from "./scalar.js";
@@ -66,7 +67,7 @@ function build(source: unknown, state: Walk): SchemaNode {
 		return node;
 	}
 	const annotated = { ...node, metadata: metadata(source, definition, state), constraints: checks(definition, state) };
-	if (data(definition, "coerce") !== true) return annotated;
+	if (observed(definition, "coerce", state, "zod.coercion-unreadable") !== true) return annotated;
 	state.partial("zod.coercion");
 	return {
 		kind: "wrapper",

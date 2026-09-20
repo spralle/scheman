@@ -90,6 +90,9 @@ not an executable validator equivalent to the source.
 - Draft-07 `$ref` siblings are ignored but retained; 2020-12 siblings remain
   conjunctive. Dialect defaults to 2020-12; specify draft-07 when appropriate.
   Unsupported/conflicting dialect evidence is diagnosed.
+  Automatic anchor discovery only follows that dialect's schema locations, not
+  out-of-dialect annotation payloads: for example, use `definitions` (not `$defs`)
+  for draft-07 anchor discovery. Explicit JSON Pointer references remain supported.
 - Zod structure and metadata calls require independent permissions. Use
   `zod3Provider({ execution: { shape: 'allow', lazy: 'allow', metadata: 'allow' } })`
   or `zod4Provider` **only on trusted schemas**. Permissions default to deny.

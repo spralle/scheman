@@ -2,21 +2,9 @@ import { data, entries, isReference, pointer } from "../../document/reader.js";
 import { schemaObject } from "./reader.js";
 import type { IndexedDefinition, JsonSchemaDialect, Location } from "./types.js";
 
-const maps = ["properties", "patternProperties", "dependentSchemas", "$defs", "definitions", "dependencies"];
-const singles = [
-	"additionalProperties",
-	"additionalItems",
-	"contains",
-	"propertyNames",
-	"not",
-	"if",
-	"then",
-	"else",
-	"unevaluatedProperties",
-	"unevaluatedItems",
-	"contentSchema",
-];
-const lists = ["allOf", "oneOf", "anyOf", "prefixItems", "items"];
+const maps = ["properties", "patternProperties"];
+const singles = ["additionalProperties", "contains", "propertyNames", "not", "if", "then", "else"];
+const lists = ["allOf", "oneOf", "anyOf"];
 export interface ScanContext {
 	diagnose(code: string, path: string): void;
 	take(path: string): boolean;
@@ -24,10 +12,13 @@ export interface ScanContext {
 	read(source: unknown, key: string | number, path: string): unknown;
 }
 
-export function* children(location: Location, context: ScanContext): Generator<Location> {
-	for (const key of maps) yield* mapChildren(location, key, context);
-	for (const key of lists) yield* listChildren(location, key, context);
-	for (const key of singles) {
+export function* children(location: Location, context: ScanContext, dialect: JsonSchemaDialect): Generator<Location> {
+	const legacy = dialect === "draft-07";
+	const dialectMaps = legacy ? ["definitions", "dependencies"] : ["$defs", "definitions", "dependentSchemas"];
+	for (const key of [...maps, ...dialectMaps]) yield* mapChildren(location, key, context);
+	for (const key of [...lists, legacy ? "items" : "prefixItems"]) yield* listChildren(location, key, context);
+	const extra = legacy ? ["additionalItems"] : ["items", "unevaluatedProperties", "unevaluatedItems", "contentSchema"];
+	for (const key of [...singles, ...extra]) {
 		const source = context.read(location.source, key, location.pointer);
 		if (source === undefined) continue;
 		if (!context.take(location.pointer)) return;

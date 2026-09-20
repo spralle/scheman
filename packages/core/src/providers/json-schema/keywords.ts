@@ -46,7 +46,6 @@ const structural = new Set([
 	"oneOf",
 	"anyOf",
 	"$ref",
-	"$defs",
 	"definitions",
 	"if",
 	"then",
@@ -56,7 +55,7 @@ const structural = new Set([
 	"propertyNames",
 	"patternProperties",
 ]);
-const modern = new Set(["prefixItems", "dependentSchemas", "dependentRequired", "minContains", "maxContains"]);
+const modern = new Set(["$defs", "prefixItems", "dependentSchemas", "dependentRequired", "minContains", "maxContains"]);
 const legacy = new Set(["additionalItems", "dependencies"]);
 
 export interface KeywordData {

@@ -1,6 +1,7 @@
 import { data, entries } from "../../document/reader.js";
 import type { OwnedValue } from "../../document/types.js";
 import { checkValue } from "./check-values.js";
+import { evidence, observed } from "./evidence.js";
 import type { Walk } from "./types.js";
 
 const known = new Set([
@@ -68,20 +69,27 @@ const fields = new Set([
 
 export function checks(definition: unknown, state: Walk): OwnedValue {
 	const result: Record<string, unknown> = Object.create(null);
-	const raw = data(definition, "checks");
-	const evidence: unknown[] = [];
-	if (Array.isArray(raw)) {
-		for (let index = 0; index < raw.length && state.take(); index++) {
-			const check = data(raw, index);
-			evidence.push(checkEvidence(state.reader.version === 3 ? check : data(data(check, "_zod"), "def"), state));
-		}
-	}
-	if (evidence.length) result.checks = evidence;
+	const items = checkList(definition, state);
+	if (items.length) result.checks = items;
 	for (const key of ["minLength", "maxLength", "exactLength", "format"]) {
-		const value = data(definition, key);
+		const value = observed(definition, key, state, "zod.checks-unreadable");
 		if (value !== undefined && value !== null) result[key] = value;
 	}
 	return state.context.copy(result, state.side, state.path);
+}
+function checkList(definition: unknown, state: Walk): unknown[] {
+	const item = evidence(definition, "checks");
+	if (item.status === "absent" || (item.status === "value" && item.value === undefined)) return [];
+	if (item.status !== "value" || !Array.isArray(item.value)) {
+		state.partial("zod.checks-unreadable");
+		return [{ opaque: true, reason: "zod.checks-unreadable" }];
+	}
+	const items: unknown[] = [];
+	for (let index = 0; index < item.value.length && state.take(); index++) {
+		const check = data(item.value, index);
+		items.push(checkEvidence(state.reader.version === 3 ? check : data(data(check, "_zod"), "def"), state));
+	}
+	return items;
 }
 function checkEvidence(definition: unknown, state: Walk): unknown {
 	const kind = data(definition, state.reader.version === 3 ? "kind" : "check");
@@ -91,9 +99,15 @@ function checkEvidence(definition: unknown, state: Walk): unknown {
 		result.opaque = true;
 		result.unsupported = state.context.copy(definition, state.side, state.path);
 	}
-	for (const [key, value] of entries(definition)) {
+	for (const [key] of entries(definition)) {
 		if (!state.take()) break;
-		if (fields.has(key)) result[key] = checkValue(value);
+		if (!fields.has(key)) continue;
+		const item = evidence(definition, key);
+		if (item.status !== "value") {
+			state.partial("zod.checks-unreadable");
+			result.opaque = true;
+			result[key] = { status: "unavailable" };
+		} else result[key] = checkValue(item.value);
 	}
 	return result;
 }

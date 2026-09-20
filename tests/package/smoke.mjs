@@ -29,6 +29,21 @@ export async function smoke(core) {
 	check(root.properties[0].presence === "required", "Local presence");
 	check(Object.isFrozen(root) && !Object.isFrozen(source), "Owned boundary");
 	check(JSON.parse(JSON.stringify(document)).formatVersion === 1, "Serializable graph");
+	for (const dialect of ["draft-07", "draft-2020-12"]) {
+		const ignored =
+			dialect === "draft-07" ? { prefixItems: [{ $id: "#phantom" }] } : { additionalItems: { $anchor: "phantom" } };
+		const graph = core.ingestSchemaDocument(
+			{ $ref: "#phantom", ...ignored },
+			{ provider: core.jsonSchemaProvider({ dialect }) },
+		).document;
+		for (const side of ["input", "output"]) {
+			const reference = graph.nodes[graph.root[side].nodeId];
+			check(
+				reference.kind === "ref" && reference.unresolved === "missing-anchor" && !reference.target,
+				"Out-of-dialect phantom anchor must not resolve",
+			);
+		}
+	}
 	let calls = 0;
 	const standard = {
 		"~standard": {
