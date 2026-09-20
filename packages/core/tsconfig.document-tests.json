@@ -1,0 +1,11 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"composite": false,
+		"rootDir": ".",
+		"skipLibCheck": false,
+		"noEmit": true
+	},
+	"include": ["tests/document-types.ts"],
+	"exclude": []
+}
