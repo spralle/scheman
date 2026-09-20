@@ -3,3 +3,5 @@ dist/
 *.tsbuildinfo
 .turbo/
 trees/**
+packages/core/README.md
+packages/core/MIGRATION.md

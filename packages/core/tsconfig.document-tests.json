@@ -6,6 +6,6 @@
 		"skipLibCheck": false,
 		"noEmit": true
 	},
-	"include": ["tests/document-types.ts"],
+	"include": ["tests/document-types.ts", "src/__tests__/json-provider-types.fixture.ts"],
 	"exclude": []
 }

@@ -1,7 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { ingestSchemaDocument } from "../src/ingest-document.js";
-import { standardSchemaProvider } from "../src/providers/standard-schema.js";
-import type { StandardSchemaIssue, StandardSchemaResult } from "../src/standard.js";
+import { ingestSchemaDocument, standardSchemaProvider } from "../src/index.js";
+import type { StandardSchemaIssue, StandardSchemaResult } from "../src/index.js";
 
 const schema: StandardSchemaV1<string, number> = {
 	"~standard": {

@@ -2,12 +2,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 
-const roots = [
-	"packages/core/src/document",
-	"packages/core/src/providers",
-	"packages/core/src/ingest-document.ts",
-	"packages/core/src/standard.ts",
-];
+const roots = ["packages/core/src"];
 
 function files(path) {
 	if (!statSync(path).isDirectory()) return [path];
@@ -62,7 +57,7 @@ function inspect(path) {
 
 const metrics = roots
 	.flatMap(files)
-	.filter((path) => path.endsWith(".ts"))
+	.filter((path) => path.endsWith(".ts") && !path.includes("/__tests__/"))
 	.map(inspect);
 console.table(metrics);
 const failures = metrics.filter((item) => item.lines > 400 || item.functionLines >= 50 || item.nesting > 3);

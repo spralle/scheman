@@ -30,3 +30,12 @@ jobs:
 
       - name: Build
         run: bun run build
+
+      - name: Production code principles
+        run: bun run test:principles
+
+      - name: Install browser for packed-artifact tests
+        run: bunx playwright install --with-deps chromium
+
+      - name: Packed artifact consumers and browser runtime
+        run: bun run test:package

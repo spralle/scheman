@@ -1,6 +1,6 @@
-import type { JsonSchema } from "./adapters/json-schema-types.js";
+import type { JsonSchema } from "./providers/json-schema/index.js";
 
-/** A synchronous transform applied to a JSON Schema before extraction */
+/** A caller-trusted synchronous transform, including boolean JSON Schemas. */
 export type SchemaMiddleware = (schema: JsonSchema) => JsonSchema;
 
 /** Compose N middleware functions left-to-right over a schema */
